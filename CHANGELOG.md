@@ -235,6 +235,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 **For detailed documentation:**
 - Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Features: [docs/FEATURES.md](docs/FEATURES.md)
-- Setup Guide: [docs/guides/QUICK_START.md](docs/guides/QUICK_START.md)
+- Setup Guide: [docs/guides/QUICK_START_MASTER.md](docs/guides/QUICK_START_MASTER.md)
 - API Reference: [docs/API_REFERENCE.md](docs/API_REFERENCE.md)
 

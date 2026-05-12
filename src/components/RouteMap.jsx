@@ -15,6 +15,8 @@ const RouteMap = ({ route, origin, destination, userCoords, originPlace, destina
     const mapInstanceRef = useRef(null)
     const [routeCoordinates, setRouteCoordinates] = useState(null)
     const [loading, setLoading] = useState(true)
+    const [error, setError] = useState(null)
+    const [mapReady, setMapReady] = useState(false)
 
     // Geocode location name to coordinates
     const geocodeLocation = async (locationName) => {
@@ -61,25 +63,68 @@ const RouteMap = ({ route, origin, destination, userCoords, originPlace, destina
 
     useEffect(() => {
         // Ensure the map container exists before initializing
-        if (!mapRef.current) return
-        if (mapInstanceRef.current) return
+        if (!mapRef.current) {
+            console.warn('Map container ref not ready')
+            return
+        }
+
+        if (mapInstanceRef.current) {
+            console.log('Map already initialized')
+            return
+        }
+
+        console.log('Initializing map...')
 
         // Small delay to ensure DOM is ready
         const timer = setTimeout(() => {
-            if (!mapRef.current) return
+            if (!mapRef.current) {
+                console.error('Map container disappeared')
+                return
+            }
 
             try {
+                // Check if Leaflet is loaded
+                if (typeof L === 'undefined') {
+                    console.error('Leaflet library not loaded')
+                    setError('Map library not loaded. Please refresh the page.')
+                    setLoading(false)
+                    return
+                }
+
                 // Initialize map centered on Batangas
-                const map = L.map(mapRef.current).setView([13.7565, 121.0583], 11)
+                console.log('Creating Leaflet map instance...')
+                const map = L.map(mapRef.current, {
+                    center: [13.7565, 121.0583],
+                    zoom: 11,
+                    zoomControl: true,
+                    scrollWheelZoom: true
+                })
+
                 mapInstanceRef.current = map
+                console.log('Map instance created successfully')
 
                 // Add OpenStreetMap tile layer
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                     attribution: '© OpenStreetMap contributors',
                     maxZoom: 19,
                 }).addTo(map)
+
+                // Wait for tiles to load
+                map.whenReady(() => {
+                    console.log('Map tiles loaded and ready')
+                    setMapReady(true)
+                    setLoading(false)
+                })
+
+                // Handle tile load errors
+                map.on('tileerror', (error) => {
+                    console.error('Tile load error:', error)
+                })
+
             } catch (error) {
                 console.error('Map initialization error:', error)
+                setError(`Failed to initialize map: ${error.message}`)
+                setLoading(false)
             }
         }, 100)
 
@@ -87,6 +132,7 @@ const RouteMap = ({ route, origin, destination, userCoords, originPlace, destina
             clearTimeout(timer)
             if (mapInstanceRef.current) {
                 try {
+                    console.log('Cleaning up map instance')
                     mapInstanceRef.current.remove()
                 } catch (error) {
                     console.error('Map cleanup error:', error)
@@ -97,10 +143,21 @@ const RouteMap = ({ route, origin, destination, userCoords, originPlace, destina
     }, [])
 
     useEffect(() => {
-        if (!mapInstanceRef.current || !origin || !destination) return
+        if (!mapInstanceRef.current || !mapReady) {
+            console.log('Map not ready yet, skipping route setup')
+            return
+        }
+
+        if (!origin || !destination) {
+            console.warn('Missing origin or destination')
+            return
+        }
+
+        console.log('Setting up route...', { origin, destination, originPlace, destinationPlace })
 
         const map = mapInstanceRef.current
         setLoading(true)
+        setError(null)
 
         // Clear existing markers and polylines safely
         try {
@@ -114,36 +171,47 @@ const RouteMap = ({ route, origin, destination, userCoords, originPlace, destina
         }
 
         const setupRoute = async () => {
-            // Use validated place objects if available (CRITICAL for accuracy)
-            let startCoords = userCoords
-            if (!startCoords && originPlace) {
-                startCoords = { lat: originPlace.lat, lng: originPlace.lng }
-            } else if (!startCoords) {
-                startCoords = await geocodeLocation(origin)
-            }
-
-            let endCoords = null
-            if (destinationPlace) {
-                endCoords = { lat: destinationPlace.lat, lng: destinationPlace.lng }
-            } else {
-                endCoords = await geocodeLocation(destination)
-            }
-
-            if (!startCoords || !endCoords) {
-                // Fallback to Batangas area coordinates
-                startCoords = startCoords || { lat: 13.7565, lng: 121.0583 }
-                const endOffset = { lat: 0.05, lng: 0.05 }
-                const finalEndCoords = endCoords || {
-                    lat: startCoords.lat + endOffset.lat,
-                    lng: startCoords.lng + endOffset.lng
+            try {
+                // Use validated place objects if available (CRITICAL for accuracy)
+                let startCoords = userCoords
+                if (!startCoords && originPlace) {
+                    startCoords = { lat: originPlace.lat, lng: originPlace.lng }
+                    console.log('Using originPlace coords:', startCoords)
+                } else if (!startCoords) {
+                    console.log('Geocoding origin:', origin)
+                    startCoords = await geocodeLocation(origin)
                 }
 
-                setLoading(false)
-                return { start: startCoords, end: finalEndCoords }
-            }
+                let endCoords = null
+                if (destinationPlace) {
+                    endCoords = { lat: destinationPlace.lat, lng: destinationPlace.lng }
+                    console.log('Using destinationPlace coords:', endCoords)
+                } else {
+                    console.log('Geocoding destination:', destination)
+                    endCoords = await geocodeLocation(destination)
+                }
 
-            setLoading(false)
-            return { start: startCoords, end: endCoords }
+                if (!startCoords || !endCoords) {
+                    console.error('Failed to get coordinates', { startCoords, endCoords })
+                    // Fallback to Batangas area coordinates
+                    startCoords = startCoords || { lat: 13.7565, lng: 121.0583 }
+                    const endOffset = { lat: 0.05, lng: 0.05 }
+                    const finalEndCoords = endCoords || {
+                        lat: startCoords.lat + endOffset.lat,
+                        lng: startCoords.lng + endOffset.lng
+                    }
+
+                    setError('Could not find exact locations. Showing approximate area.')
+                    return { start: startCoords, end: finalEndCoords }
+                }
+
+                console.log('Coordinates resolved:', { start: startCoords, end: endCoords })
+                return { start: startCoords, end: endCoords }
+            } catch (error) {
+                console.error('Error in setupRoute:', error)
+                setError(`Route setup failed: ${error.message}`)
+                throw error
+            }
         }
 
         setupRoute().then(async ({ start, end }) => {
@@ -227,7 +295,9 @@ const RouteMap = ({ route, origin, destination, userCoords, originPlace, destina
                     .bindPopup(`<b>Destination:</b> ${destination}`)
 
                 // Get and draw route
+                console.log('Fetching route from OSRM...')
                 const routePoints = await getRoute(start, end)
+                console.log('Route points received:', routePoints.length, 'points')
                 setRouteCoordinates(routePoints)
 
                 // Add route polyline outline (darker, wider)
@@ -257,16 +327,21 @@ const RouteMap = ({ route, origin, destination, userCoords, originPlace, destina
                     [end.lat, end.lng]
                 ])
                 map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 })
+
+                console.log('Route rendered successfully')
+                setLoading(false)
             } catch (error) {
                 console.error('Error setting up route on map:', error)
+                setError(`Failed to render route: ${error.message}`)
                 setLoading(false)
             }
         }).catch(error => {
             console.error('Error in setupRoute:', error)
+            setError(`Route generation failed: ${error.message}`)
             setLoading(false)
         })
 
-    }, [route, origin, destination, userCoords, originPlace, destinationPlace])
+    }, [route, origin, destination, userCoords, originPlace, destinationPlace, mapReady])
 
     return (
         <div className="relative">
@@ -279,8 +354,23 @@ const RouteMap = ({ route, origin, destination, userCoords, originPlace, destina
                 <div className="absolute inset-0 bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm rounded-2xl flex items-center justify-center z-10">
                     <div className="text-center">
                         <div className="w-12 h-12 border-4 border-primary-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">Loading map...</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
+                            {!mapReady ? 'Initializing map...' : 'Loading route...'}
+                        </p>
                     </div>
+                </div>
+            )}
+            {error && (
+                <div className="absolute top-4 left-4 right-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 z-10">
+                    <p className="text-sm text-red-800 dark:text-red-300">
+                        ⚠️ {error}
+                    </p>
+                </div>
+            )}
+            {import.meta.env.DEV && (
+                <div className="absolute bottom-4 left-4 bg-gray-900/90 text-white text-xs px-3 py-2 rounded-lg z-10">
+                    <div>Map: {mapReady ? '✅' : '⏳'}</div>
+                    <div>Route: {routeCoordinates ? `✅ ${routeCoordinates.length} points` : '⏳'}</div>
                 </div>
             )}
         </div>

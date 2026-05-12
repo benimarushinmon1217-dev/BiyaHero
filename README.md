@@ -172,7 +172,7 @@ npm run dev
 http://localhost:5173
 ```
 
-**Detailed Guide:** See [docs/guides/QUICK_START.md](docs/guides/QUICK_START.md)
+**Detailed Guide:** See [docs/guides/QUICK_START_MASTER.md](docs/guides/QUICK_START_MASTER.md)
 
 ---
 
@@ -361,9 +361,9 @@ biyahero/
 ## 📚 Documentation
 
 ### Getting Started
-- **[Quick Start Guide](docs/guides/QUICK_START.md)** - Get up and running in 10 minutes
+- **[Quick Start Guide](docs/guides/QUICK_START_MASTER.md)** - Get up and running in 10 minutes
 - **[Backend Setup](docs/guides/BACKEND_SETUP.md)** - Detailed backend configuration
-- **[Installation Guide](docs/guides/QUICK_INSTALL.md)** - Step-by-step installation
+- **[Development Environment](docs/guides/DEVELOPMENT_ENVIRONMENT.md)** - Development setup guide
 
 ### Technical Documentation
 - **[Architecture](docs/ARCHITECTURE.md)** - System design and patterns

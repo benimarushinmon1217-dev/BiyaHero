@@ -239,8 +239,7 @@ biyahero/
 
 ### For Users
 - **README.md** - Project overview and quick start
-- **docs/guides/QUICK_START.md** - Get started in 10 minutes
-- **docs/guides/QUICK_INSTALL.md** - Installation guide
+- **docs/guides/QUICK_START_MASTER.md** - Get started in 10 minutes
 - **CHANGELOG.md** - Version history
 
 ### For Developers
