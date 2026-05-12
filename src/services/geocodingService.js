@@ -348,12 +348,12 @@ export const formatPlaceDisplay = (place) => {
  * @returns {boolean} True if valid
  */
 export const validatePlaceCoordinates = (place) => {
-    // Batangas approximate bounds
+    // Batangas Province bounds (expanded to cover all areas)
     const BATANGAS_BOUNDS = {
-        minLat: 13.5,
-        maxLat: 14.3,
-        minLng: 120.8,
-        maxLng: 121.5
+        minLat: 13.4,    // Southern Batangas
+        maxLat: 14.4,    // Northern Batangas
+        minLng: 120.7,   // Western Batangas
+        maxLng: 121.8    // Eastern Batangas (includes Lipa City)
     }
 
     return (

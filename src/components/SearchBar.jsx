@@ -1,9 +1,19 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { MapPin, Navigation, Search, Locate, X, CheckCircle } from 'lucide-react'
+import { MapPin, Navigation, Search, Locate, X, CheckCircle, MapPinned, Info } from 'lucide-react'
 import { getAutocompleteSuggestions } from '../services/searchService'
 import { getPlaceSuggestions, getPlaceIcon, formatPlaceDisplay } from '../services/geocodingService'
+
+// Quick location presets for easy access
+const QUICK_LOCATIONS = [
+    { name: 'SM City Lipa', lat: 13.9380, lng: 121.1625, icon: '🏬' },
+    { name: 'Lipa Cathedral', lat: 13.9411, lng: 121.1650, icon: '⛪' },
+    { name: 'BSU Lipa', lat: 13.9450, lng: 121.1680, icon: '🎓' },
+    { name: 'Batangas Grand Terminal', lat: 13.7565, lng: 121.0583, icon: '🚌' },
+    { name: 'Tanauan City Hall', lat: 14.0858, lng: 121.1500, icon: '🏛️' },
+    { name: 'Rosario Town Center', lat: 13.8458, lng: 121.2042, icon: '🏘️' }
+]
 
 const SearchBar = () => {
     const navigate = useNavigate()
@@ -11,7 +21,12 @@ const SearchBar = () => {
     const [destination, setDestination] = useState('')
     const [loadingLocation, setLoadingLocation] = useState(false)
     const [locationError, setLocationError] = useState('')
+    const [locationWarning, setLocationWarning] = useState('')
     const [userCoords, setUserCoords] = useState(null)
+    const [showQuickLocations, setShowQuickLocations] = useState(false)
+    const [locationConfidence, setLocationConfidence] = useState(null) // 'high', 'medium', 'low'
+    const [showDebugPanel, setShowDebugPanel] = useState(false)
+    const [debugInfo, setDebugInfo] = useState(null)
 
     // Selected place objects (validated coordinates)
     const [selectedOriginPlace, setSelectedOriginPlace] = useState(null)
@@ -184,6 +199,24 @@ const SearchBar = () => {
         setDestination('')
     }
 
+    const handleQuickLocationSelect = (location) => {
+        setSelectedOriginPlace({
+            name: location.name,
+            lat: location.lat,
+            lng: location.lng,
+            displayName: location.name,
+            category: 'preset_location',
+            confidence: 1.0,
+            isKnownLocation: true
+        })
+        setOrigin(location.name)
+        setUserCoords({ lat: location.lat, lng: location.lng })
+        setLocationError('')
+        setLocationWarning('')
+        setShowQuickLocations(false)
+        setLocationConfidence('high')
+    }
+
     const handleOriginKeyDown = (e) => {
         if (!showOriginSuggestions || originSuggestions.length === 0) return
 
@@ -225,72 +258,235 @@ const SearchBar = () => {
     const handleUseCurrentLocation = () => {
         setLoadingLocation(true)
         setLocationError('')
+        setLocationWarning('')
+        setShowQuickLocations(false)
+
+        // Check if running on localhost
+        const isLocalhost = window.location.hostname === 'localhost' ||
+            window.location.hostname === '127.0.0.1'
+
+        if (isLocalhost) {
+            setLocationWarning(
+                '💡 Running on localhost: Location detection may be less accurate on desktop. ' +
+                'For best results, test on mobile device or enable Windows location services.'
+            )
+        }
 
         if (!navigator.geolocation) {
-            setLocationError('Geolocation is not supported by your browser')
+            setLocationError('Geolocation is not supported by your browser. Please select a location below.')
+            setShowQuickLocations(true)
             setLoadingLocation(false)
             return
         }
 
         navigator.geolocation.getCurrentPosition(
             async (position) => {
-                const { latitude, longitude } = position.coords
+                const { latitude, longitude, accuracy } = position.coords
                 const coords = { lat: latitude, lng: longitude }
-                setUserCoords(coords)
 
-                // Create a place object for current location
-                setSelectedOriginPlace({
-                    name: 'Your Location',
-                    lat: latitude,
-                    lng: longitude,
-                    displayName: `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
-                    category: 'current_location',
-                    confidence: 1.0,
-                    isKnownLocation: false
-                })
+                console.log('📍 GPS Coordinates:', { latitude, longitude, accuracy: `${accuracy.toFixed(0)}m` })
 
-                // Reverse geocode to get address
+                // Determine initial confidence based on GPS accuracy
+                let confidence = 'low'
+                if (accuracy <= 50) confidence = 'high'
+                else if (accuracy <= 200) confidence = 'medium'
+
+                // Reverse geocode to get address FIRST
                 try {
                     const response = await fetch(
                         `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&accept-language=en`
                     )
                     const data = await response.json()
 
+                    console.log('🗺️ Reverse Geocoding Response:', data)
+
+                    // EXPANDED Batangas bounds with tolerance
+                    const BATANGAS_BOUNDS = {
+                        minLat: 13.50,   // Expanded south (includes all southern Batangas)
+                        maxLat: 14.20,   // Expanded north (includes all northern areas)
+                        minLng: 120.70,  // Expanded west
+                        maxLng: 121.40   // Expanded east (includes all Lipa and eastern areas)
+                    }
+
+                    // Known Batangas municipalities (whitelist)
+                    const BATANGAS_MUNICIPALITIES = [
+                        'lipa', 'lipa city', 'batangas city', 'batangas', 'tanauan', 'tanauan city',
+                        'rosario', 'ibaan', 'padre garcia', 'san jose', 'bauan', 'cuenca',
+                        'malvar', 'sto tomas', 'santo tomas', 'mataasnakahoy', 'mataas na kahoy',
+                        'balete', 'talisay', 'nasugbu', 'calaca', 'lemery', 'san juan',
+                        'taal', 'laurel', 'agoncillo', 'alitagtag', 'balayan', 'calatagan',
+                        'san luis', 'san nicolas', 'san pascual', 'santa teresita', 'tuy',
+                        'lobo', 'mabini', 'san antonio', 'tingloy', 'taysan'
+                    ]
+
+                    // MULTI-LAYER VALIDATION
+                    const address = data.address || {}
+
+                    // Extract location info from all possible fields
+                    const province = (address.state || address.province || '').toLowerCase()
+                    const city = (address.city || '').toLowerCase()
+                    const town = (address.town || '').toLowerCase()
+                    const municipality = (address.municipality || '').toLowerCase()
+                    const county = (address.county || '').toLowerCase()
+                    const displayName = (data.display_name || '').toLowerCase()
+
+                    console.log('📋 Parsed Location Data:', {
+                        province,
+                        city,
+                        town,
+                        municipality,
+                        county,
+                        displayName
+                    })
+
+                    // VALIDATION LAYER 1: Check province name (highest priority)
+                    const provinceMatch = (
+                        province.includes('batangas') ||
+                        displayName.includes('batangas province') ||
+                        displayName.includes('province of batangas')
+                    )
+
+                    // VALIDATION LAYER 2: Check municipality/city name
+                    const municipalityMatch = BATANGAS_MUNICIPALITIES.some(muni =>
+                        city.includes(muni) ||
+                        town.includes(muni) ||
+                        municipality.includes(muni) ||
+                        county.includes(muni) ||
+                        displayName.includes(muni)
+                    )
+
+                    // VALIDATION LAYER 3: Check coordinate bounds (with tolerance)
+                    const coordinateMatch = (
+                        latitude >= BATANGAS_BOUNDS.minLat &&
+                        latitude <= BATANGAS_BOUNDS.maxLat &&
+                        longitude >= BATANGAS_BOUNDS.minLng &&
+                        longitude <= BATANGAS_BOUNDS.maxLng
+                    )
+
+                    console.log('✅ Validation Results:', {
+                        provinceMatch,
+                        municipalityMatch,
+                        coordinateMatch
+                    })
+
+                    // Accept if ANY validation layer passes
+                    const isInBatangas = provinceMatch || municipalityMatch || coordinateMatch
+
+                    // Update confidence based on validation layers
+                    if (provinceMatch && municipalityMatch && coordinateMatch) {
+                        confidence = 'high'
+                    } else if (provinceMatch || municipalityMatch) {
+                        confidence = 'medium'
+                    } else if (coordinateMatch) {
+                        confidence = 'low'
+                    }
+
+                    // Collect debug info
+                    const debugData = {
+                        coordinates: { latitude, longitude },
+                        accuracy: `${accuracy.toFixed(0)}m`,
+                        confidence,
+                        timestamp: new Date().toLocaleTimeString(),
+                        parsedLocation: {
+                            province,
+                            city: city || town || municipality,
+                            displayName
+                        },
+                        validation: { provinceMatch, municipalityMatch, coordinateMatch },
+                        finalConfidence: confidence,
+                        isInBatangas
+                    }
+                    setDebugInfo(debugData)
+
+                    if (!isInBatangas) {
+                        // Location is outside Batangas - show friendly message
+                        console.warn('❌ Location validation failed')
+                        setLocationError(
+                            `📍 We detected your location outside Batangas Province. ` +
+                            `You can still select a Batangas location below.`
+                        )
+                        setShowQuickLocations(true)
+                        setOrigin('')
+                        setSelectedOriginPlace(null)
+                        setUserCoords(null)
+                        setLoadingLocation(false)
+                        return
+                    }
+
+                    // SUCCESS - Location validated!
+                    console.log('✅ Location validated as Batangas')
+
+                    setUserCoords(coords)
+                    setLocationConfidence(confidence)
+
+                    // Show warnings based on confidence
+                    if (confidence === 'medium') {
+                        setLocationWarning('📍 Approximate location detected. You can adjust if needed.')
+                    } else if (confidence === 'low') {
+                        setLocationWarning('📍 Location detected with low accuracy. Please verify or select from quick locations.')
+                        setShowQuickLocations(true)
+                    }
+
                     // Create a readable address
-                    const address = data.address
                     const locationName = address.city || address.town || address.village ||
                         address.municipality || address.county ||
                         `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`
 
+                    // Create a place object for current location
+                    setSelectedOriginPlace({
+                        name: locationName,
+                        lat: latitude,
+                        lng: longitude,
+                        displayName: `${locationName} (Your Location)`,
+                        category: 'current_location',
+                        confidence: confidence === 'high' ? 1.0 : confidence === 'medium' ? 0.7 : 0.4,
+                        isKnownLocation: false
+                    })
+
                     setOrigin(locationName)
                     setLoadingLocation(false)
                 } catch (error) {
-                    // Fallback to coordinates
-                    setOrigin(`${latitude.toFixed(4)}, ${longitude.toFixed(4)}`)
+                    console.error('❌ Reverse geocoding error:', error)
+                    // Fallback - show quick locations
+                    setLocationError('📍 Unable to verify your location. Please select a location below.')
+                    setShowQuickLocations(true)
                     setLoadingLocation(false)
                 }
             },
             (error) => {
-                let errorMessage = 'Unable to access your location.'
+                let errorMessage = '📍 Unable to access your location. '
+
+                // Check if running on localhost for better error messages
+                const isLocalhost = window.location.hostname === 'localhost' ||
+                    window.location.hostname === '127.0.0.1'
 
                 switch (error.code) {
                     case error.PERMISSION_DENIED:
-                        errorMessage = 'Location permission denied. Please enable location services.'
+                        errorMessage += 'Location permission denied. '
+                        if (isLocalhost) {
+                            errorMessage += 'On Windows, enable location services in Settings → Privacy → Location. '
+                        }
                         break
                     case error.POSITION_UNAVAILABLE:
-                        errorMessage = 'Location information unavailable.'
+                        errorMessage += 'Location information unavailable. '
                         break
                     case error.TIMEOUT:
-                        errorMessage = 'Location request timed out.'
+                        errorMessage += 'Location request timed out. '
+                        if (isLocalhost) {
+                            errorMessage += 'This can happen on desktop or with weak signal. '
+                        }
                         break
                 }
 
+                errorMessage += 'Please select a location below.'
+
                 setLocationError(errorMessage)
+                setShowQuickLocations(true)
                 setLoadingLocation(false)
             },
             {
                 enableHighAccuracy: true,
-                timeout: 10000,
+                timeout: 15000,  // Increased timeout
                 maximumAge: 0
             }
         )
@@ -323,6 +519,16 @@ const SearchBar = () => {
                     {/* Place confirmed indicator */}
                     {selectedOriginPlace && (
                         <div className="absolute right-12 top-1/2 transform -translate-y-1/2 flex items-center space-x-1 z-10">
+                            {locationConfidence && (
+                                <span className={`text-xs px-2 py-1 rounded-full mr-1 ${locationConfidence === 'high' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                                    locationConfidence === 'medium' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                                        'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300'
+                                    }`}>
+                                    {locationConfidence === 'high' ? '✅' :
+                                        locationConfidence === 'medium' ? '⚠️' :
+                                            '⚠️'}
+                                </span>
+                            )}
                             <CheckCircle size={18} className="text-green-600 dark:text-green-400" />
                             <button
                                 type="button"
@@ -452,6 +658,48 @@ const SearchBar = () => {
                     >
                         <span>⚠️</span>
                         <span>{locationError}</span>
+                    </motion.div>
+                )}
+
+                {/* Location Warning Message */}
+                {locationWarning && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="text-sm text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-4 py-2 rounded-lg flex items-start space-x-2"
+                    >
+                        <span>💡</span>
+                        <span>{locationWarning}</span>
+                    </motion.div>
+                )}
+
+                {/* Quick Location Buttons */}
+                {showQuickLocations && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 px-4 py-3 rounded-lg border border-blue-200 dark:border-blue-800"
+                    >
+                        <p className="text-sm font-medium text-blue-900 dark:text-blue-300 mb-2">
+                            📍 Quick select a location:
+                        </p>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                            {QUICK_LOCATIONS.map((location, index) => (
+                                <button
+                                    key={index}
+                                    type="button"
+                                    onClick={() => handleQuickLocationSelect(location)}
+                                    className="px-3 py-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-primary-500 dark:hover:border-primary-400 hover:shadow-md transition-all text-left"
+                                >
+                                    <div className="flex items-center space-x-2">
+                                        <span className="text-xl">{location.icon}</span>
+                                        <span className="text-sm font-medium text-gray-900 dark:text-white">
+                                            {location.name}
+                                        </span>
+                                    </div>
+                                </button>
+                            ))}
+                        </div>
                     </motion.div>
                 )}
 
@@ -602,6 +850,31 @@ const SearchBar = () => {
                         className="text-xs text-gray-500 dark:text-gray-400 text-center"
                     >
                         💡 Select a location from the suggestions for accurate routing
+                    </motion.div>
+                )}
+
+                {/* Debug Panel (Development Only) */}
+                {import.meta.env.DEV && debugInfo && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        className="mt-4 p-4 bg-gray-100 dark:bg-gray-800 rounded-lg border border-gray-300 dark:border-gray-600"
+                    >
+                        <div className="flex items-center justify-between mb-2">
+                            <h4 className="text-sm font-bold text-gray-900 dark:text-white">
+                                🔍 Debug Info
+                            </h4>
+                            <button
+                                type="button"
+                                onClick={() => setDebugInfo(null)}
+                                className="text-xs text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                            >
+                                Close
+                            </button>
+                        </div>
+                        <pre className="text-xs text-gray-700 dark:text-gray-300 overflow-auto max-h-64">
+                            {JSON.stringify(debugInfo, null, 2)}
+                        </pre>
                     </motion.div>
                 )}
             </div>
