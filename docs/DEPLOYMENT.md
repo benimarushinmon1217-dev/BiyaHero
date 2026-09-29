@@ -1,594 +1,74 @@
-# 🚀 BiyaHero Deployment Guide
+# BiyaHero Deployment
 
-Complete guide for deploying BiyaHero to production.
+BiyaHero is configured for a Render static frontend and Render Node API. The API connects to an external MySQL server; database credentials remain server-side.
 
----
+## Render Blueprint
 
-## Deployment Options
+Use the repository's `render.yaml` with Render Blueprints. It defines:
 
-BiyaHero can be deployed to various platforms:
+| Service | Root directory | Build command | Runtime command/output |
+| --- | --- | --- | --- |
+| `biyahero-api` web service | `backend` | `npm ci` | `npm start`; health check `/health` |
+| `biyahero-frontend` static site | repository root | `npm ci && npm run build` | Publish `dist`; SPA fallback rewrites to `index.html` |
 
-1. **Vercel** (Recommended for frontend)
-2. **Netlify** (Alternative for frontend)
-3. **Render** (Recommended for backend)
-4. **Railway** (Alternative for backend)
-5. **Self-hosted** (VPS/Cloud)
+Do not deploy the legacy root `server/index.js`; it is a mock API. The production API entrypoint is `backend/server.js`.
 
----
+After creating the services, set the backend's `FRONTEND_URL` to the actual public frontend origin. Set the frontend's `VITE_API_URL` to the actual backend origin followed by `/api/v1`, for example `https://<api-service>.onrender.com/api/v1`. Rebuild the frontend after changing this public build-time variable.
 
-## Frontend Deployment
+## Backend Environment
 
-### Option 1: Vercel (Recommended)
+Render supplies `PORT`; do not set a fixed production port. Configure these on the API service:
 
-#### Prerequisites
-- GitHub account
-- Vercel account (free tier available)
+| Variable | Purpose |
+| --- | --- |
+| `NODE_ENV` | Set to `production` |
+| `API_VERSION` | `v1` |
+| `DB_HOST` | Public/reachable hostname of the external MySQL server |
+| `DB_PORT` | MySQL port, usually `3306` |
+| `DB_NAME` | BiyaHero schema/database name |
+| `DB_USER` | Dedicated database user |
+| `DB_PASSWORD` | Database password; keep in Render secrets |
+| `DB_DIALECT` | `mysql` |
+| `DB_SSL` | `true` if required by the database provider, otherwise `false` |
+| `DB_SSL_CA` | Optional CA certificate when required for MySQL TLS |
+| `DB_SSL_REJECT_UNAUTHORIZED` | Keep `true` for certificate verification |
+| `JWT_SECRET` | Random secret, at least 32 characters |
+| `JWT_REFRESH_SECRET` | A separate random secret, at least 32 characters |
+| `JWT_EXPIRE` | Access-token lifetime; default `7d` |
+| `JWT_REFRESH_EXPIRE` | Refresh-token lifetime; default `30d` |
+| `FRONTEND_URL` | Exact deployed frontend origin, no trailing slash |
+| `OPENROUTE_API_KEY` | Optional; routing falls back to public OSRM when absent |
 
-#### Steps
+Never put database values, JWT secrets, or provider keys in frontend variables or `render.yaml`. The root and backend `.env.example` files are templates; local `.env` files are ignored by Git.
 
-**1. Push to GitHub:**
-```bash
-git add .
-git commit -m "Prepare for deployment"
-git push origin main
+The external database provider must allow connections from Render's outbound IP ranges and provide its hostname, port, database, user, password, and TLS requirements. Use a least-privilege database user. No connection to the external production database can be validated until those values and network permissions are supplied.
+
+## Schema Initialization
+
+The repository has Sequelize models but no migration framework or seed data. Production startup uses `sequelize.sync()` with `alter: false`, which can create missing model tables but does not alter existing tables. For an explicit initialization, run `npm run db:sync` from `backend/` with the intended database environment. Review existing production schema before running it; it is not a replacement for versioned migrations.
+
+## Frontend and Authentication
+
+The frontend reads the public `VITE_API_URL` at build time. It contains only the API URL, never database credentials or JWT signing keys. Authentication uses bearer JWTs in the `Authorization` header; tokens are stored in browser `localStorage`, not cookies. The API issues refresh tokens but currently has no refresh-token endpoint or server-side logout endpoint.
+
+Production CORS permits the configured `FRONTEND_URL`. Local development origins are allowed only when `NODE_ENV=development`.
+
+## Local Development
+
+Create ignored local env files from the templates and set local MySQL credentials in `backend/.env`. The frontend uses Vite's local `/api` and `/health` proxies to the backend on port 5000.
+
+```powershell
+npm install
+Set-Location backend
+npm install
+Set-Location ..
+npm run dev
 ```
 
-**2. Deploy to Vercel:**
+`npm run dev:mock` starts the API without the database for limited local checks; database-backed authentication and persistence require MySQL.
 
-**Via Vercel Dashboard:**
-1. Go to [vercel.com](https://vercel.com)
-2. Click "New Project"
-3. Import your GitHub repository
-4. Configure project:
-   - **Framework Preset**: Vite
-   - **Build Command**: `npm run build`
-   - **Output Directory**: `dist`
-   - **Install Command**: `npm install`
+## Verification
 
-**Via Vercel CLI:**
-```bash
-# Install Vercel CLI
-npm install -g vercel
+Check the API at `https://<api-service>.onrender.com/health`. The response reports application and database status without returning credentials. A healthy frontend build is produced by `npm run build`.
 
-# Login
-vercel login
-
-# Deploy
-vercel --prod
-```
-
-**3. Configure Environment Variables:**
-
-In Vercel Dashboard → Settings → Environment Variables:
-```
-VITE_API_BASE_URL=https://your-backend.onrender.com
-```
-
-**4. Deploy:**
-- Vercel will automatically deploy on every push to `main`
-- Preview deployments for pull requests
-- Custom domain support
-
-#### Custom Domain
-
-1. Go to Vercel Dashboard → Settings → Domains
-2. Add your domain (e.g., `biyahero.com`)
-3. Configure DNS records:
-   ```
-   Type: CNAME
-   Name: @
-   Value: cname.vercel-dns.com
-   ```
-
----
-
-### Option 2: Netlify
-
-#### Steps
-
-**1. Build Project:**
-```bash
-npm run build
-```
-
-**2. Deploy via Netlify CLI:**
-```bash
-# Install Netlify CLI
-npm install -g netlify-cli
-
-# Login
-netlify login
-
-# Deploy
-netlify deploy --prod --dir=dist
-```
-
-**3. Configure:**
-- **Build Command**: `npm run build`
-- **Publish Directory**: `dist`
-
-**4. Environment Variables:**
-```
-VITE_API_BASE_URL=https://your-backend.onrender.com
-```
-
----
-
-## Backend Deployment
-
-### Option 1: Render (Recommended)
-
-#### Prerequisites
-- GitHub account
-- Render account (free tier available)
-
-#### Steps
-
-**1. Create `render.yaml`:**
-```yaml
-services:
-  - type: web
-    name: biyahero-backend
-    env: node
-    buildCommand: cd server && npm install
-    startCommand: cd server && npm start
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: PORT
-        value: 3001
-```
-
-**2. Deploy to Render:**
-
-**Via Render Dashboard:**
-1. Go to [render.com](https://render.com)
-2. Click "New +" → "Web Service"
-3. Connect GitHub repository
-4. Configure:
-   - **Name**: biyahero-backend
-   - **Environment**: Node
-   - **Build Command**: `cd server && npm install`
-   - **Start Command**: `cd server && npm start`
-   - **Plan**: Free
-
-**3. Environment Variables:**
-```
-NODE_ENV=production
-PORT=3001
-CORS_ORIGIN=https://your-frontend.vercel.app
-```
-
-**4. Get Backend URL:**
-```
-https://biyahero-backend.onrender.com
-```
-
----
-
-### Option 2: Railway
-
-#### Steps
-
-**1. Install Railway CLI:**
-```bash
-npm install -g @railway/cli
-```
-
-**2. Login:**
-```bash
-railway login
-```
-
-**3. Initialize:**
-```bash
-cd server
-railway init
-```
-
-**4. Deploy:**
-```bash
-railway up
-```
-
-**5. Configure:**
-```bash
-railway variables set NODE_ENV=production
-railway variables set PORT=3001
-```
-
----
-
-## Environment Variables
-
-### Frontend (.env)
-```env
-# Production API URL
-VITE_API_BASE_URL=https://biyahero-backend.onrender.com
-
-# Optional: Analytics
-VITE_GA_TRACKING_ID=UA-XXXXXXXXX-X
-
-# Optional: Sentry
-VITE_SENTRY_DSN=https://xxx@sentry.io/xxx
-```
-
-### Backend (.env)
-```env
-# Server Configuration
-NODE_ENV=production
-PORT=3001
-
-# CORS
-CORS_ORIGIN=https://biyahero.vercel.app
-
-# Optional: Database
-DATABASE_URL=postgresql://user:pass@host:5432/db
-
-# Optional: Redis
-REDIS_URL=redis://host:6379
-```
-
----
-
-## Build Configuration
-
-### Vite Config (`vite.config.js`)
-```javascript
-import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
-
-export default defineConfig({
-  plugins: [react()],
-  build: {
-    outDir: 'dist',
-    sourcemap: false,
-    minify: 'terser',
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          vendor: ['react', 'react-dom', 'react-router-dom'],
-          maps: ['leaflet'],
-          animations: ['framer-motion']
-        }
-      }
-    }
-  }
-})
-```
-
----
-
-## Performance Optimization
-
-### 1. Code Splitting
-```javascript
-// Lazy load pages
-const RouteResults = lazy(() => import('./pages/RouteResults'))
-const AIAssistant = lazy(() => import('./pages/AIAssistant'))
-```
-
-### 2. Image Optimization
-```bash
-# Compress images
-npm install -g imagemin-cli
-imagemin public/*.png --out-dir=public/optimized
-```
-
-### 3. Caching
-```javascript
-// Service Worker (optional)
-// public/sw.js
-self.addEventListener('fetch', (event) => {
-  event.respondWith(
-    caches.match(event.request).then((response) => {
-      return response || fetch(event.request)
-    })
-  )
-})
-```
-
-### 4. CDN
-Use Vercel's built-in CDN for static assets.
-
----
-
-## Monitoring
-
-### 1. Vercel Analytics
-```bash
-npm install @vercel/analytics
-```
-
-```javascript
-// src/main.jsx
-import { Analytics } from '@vercel/analytics/react'
-
-<Analytics />
-```
-
-### 2. Error Tracking (Sentry)
-```bash
-npm install @sentry/react
-```
-
-```javascript
-// src/main.jsx
-import * as Sentry from '@sentry/react'
-
-Sentry.init({
-  dsn: import.meta.env.VITE_SENTRY_DSN,
-  environment: 'production'
-})
-```
-
-### 3. Uptime Monitoring
-- [UptimeRobot](https://uptimerobot.com/) (free)
-- [Pingdom](https://www.pingdom.com/)
-- [StatusCake](https://www.statuscake.com/)
-
----
-
-## SSL/HTTPS
-
-### Vercel
-- Automatic SSL certificates
-- HTTPS enforced by default
-
-### Render
-- Automatic SSL certificates
-- Custom domain support
-
-### Custom Domain
-1. Add domain in platform dashboard
-2. Configure DNS records
-3. Wait for SSL provisioning (5-10 minutes)
-
----
-
-## CI/CD Pipeline
-
-### GitHub Actions
-
-**`.github/workflows/deploy.yml`:**
-```yaml
-name: Deploy
-
-on:
-  push:
-    branches: [main]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18
-      
-      - name: Install dependencies
-        run: npm install
-      
-      - name: Build
-        run: npm run build
-      
-      - name: Deploy to Vercel
-        uses: amondnet/vercel-action@v20
-        with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: ${{ secrets.ORG_ID }}
-          vercel-project-id: ${{ secrets.PROJECT_ID }}
-```
-
----
-
-## Database Setup (Future)
-
-### PostgreSQL (Render)
-
-**1. Create Database:**
-- Go to Render Dashboard
-- Click "New +" → "PostgreSQL"
-- Copy connection string
-
-**2. Connect:**
-```javascript
-// server/db.js
-import pg from 'pg'
-
-const pool = new pg.Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-})
-
-export default pool
-```
-
----
-
-## Rollback Strategy
-
-### Vercel
-1. Go to Deployments
-2. Find previous deployment
-3. Click "Promote to Production"
-
-### Render
-1. Go to Deploys
-2. Find previous deploy
-3. Click "Redeploy"
-
-### Git
-```bash
-# Revert last commit
-git revert HEAD
-git push origin main
-```
-
----
-
-## Health Checks
-
-### Backend Health Endpoint
-```javascript
-// server/index.js
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  })
-})
-```
-
-### Frontend Health Check
-```javascript
-// src/utils/healthCheck.js
-export const checkBackendHealth = async () => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/health`)
-    return response.ok
-  } catch {
-    return false
-  }
-}
-```
-
----
-
-## Scaling
-
-### Horizontal Scaling
-- Vercel: Automatic scaling
-- Render: Upgrade to paid plan for auto-scaling
-
-### Vertical Scaling
-- Increase server resources
-- Optimize database queries
-- Add caching layer (Redis)
-
----
-
-## Backup Strategy
-
-### Code
-- GitHub repository (primary)
-- GitLab mirror (backup)
-
-### Database (Future)
-- Automated daily backups
-- Point-in-time recovery
-- Export to S3/Cloud Storage
-
----
-
-## Security Checklist
-
-- [ ] HTTPS enabled
-- [ ] Environment variables secured
-- [ ] CORS configured correctly
-- [ ] API rate limiting enabled
-- [ ] Input validation implemented
-- [ ] SQL injection prevention
-- [ ] XSS protection
-- [ ] CSRF tokens (if needed)
-- [ ] Security headers configured
-- [ ] Dependencies updated
-
----
-
-## Post-Deployment
-
-### 1. Verify Deployment
-```bash
-# Check frontend
-curl https://biyahero.vercel.app
-
-# Check backend
-curl https://biyahero-backend.onrender.com/health
-```
-
-### 2. Test Features
-- Route search
-- Fare calculation
-- Map rendering
-- AI assistant
-- Mobile responsiveness
-
-### 3. Monitor Logs
-- Vercel: Dashboard → Logs
-- Render: Dashboard → Logs
-
-### 4. Set Up Alerts
-- Error rate threshold
-- Response time threshold
-- Uptime monitoring
-
----
-
-## Troubleshooting
-
-### Build Fails
-
-**Check:**
-- Node version compatibility
-- Missing dependencies
-- Environment variables
-- Build command
-
-**Solution:**
-```bash
-# Local build test
-npm run build
-
-# Check logs
-vercel logs
-```
-
-### CORS Errors
-
-**Solution:**
-```javascript
-// server/index.js
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*',
-  credentials: true
-}))
-```
-
-### Slow Performance
-
-**Check:**
-- Bundle size
-- API response times
-- Image optimization
-- Caching headers
-
----
-
-## Cost Estimation
-
-### Free Tier (Hobby Projects)
-- **Vercel**: Free (100GB bandwidth/month)
-- **Render**: Free (750 hours/month)
-- **Total**: $0/month
-
-### Paid Tier (Production)
-- **Vercel Pro**: $20/month
-- **Render Starter**: $7/month
-- **Total**: $27/month
-
----
-
-## Support
-
-- **Vercel Docs**: [vercel.com/docs](https://vercel.com/docs)
-- **Render Docs**: [render.com/docs](https://render.com/docs)
-- **GitHub Issues**: [github.com/yourusername/biyahero/issues](https://github.com/yourusername/biyahero/issues)
-
----
-
-**Deployment Complete! 🎉**
+Known pre-deployment follow-ups: provide and verify the external MySQL connection/TLS configuration; confirm the database schema against Sequelize models; and implement or remove the frontend `calculateSegmentFare` call, whose matching API route is currently absent.

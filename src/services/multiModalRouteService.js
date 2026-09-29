@@ -3,9 +3,7 @@
  * Calls backend API for realistic multi-modal routing
  */
 
-import axios from 'axios';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+import apiClient from '../api/axios';
 
 /**
  * Get multiple route options from backend
@@ -17,7 +15,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000
  */
 export const getMultiModalRoutes = async (origin, destination, passengerType = 'regular', preference = 'recommended') => {
     try {
-        const response = await axios.post(`${API_BASE_URL}/api/v1/routes/multi-modal`, {
+        const response = await apiClient.post('/routes/multi-modal', {
             origin: {
                 name: origin.name,
                 lat: parseFloat(origin.lat),
@@ -51,7 +49,7 @@ export const getMultiModalRoutes = async (origin, destination, passengerType = '
  */
 export const getTransportHubs = async () => {
     try {
-        const response = await axios.get(`${API_BASE_URL}/api/v1/routes/transport-hubs`);
+        const response = await apiClient.get('/routes/transport-hubs');
         return {
             success: true,
             data: response.data.data
@@ -71,7 +69,7 @@ export const getTransportHubs = async () => {
  */
 export const getTransportTypes = async () => {
     try {
-        const response = await axios.get(`${API_BASE_URL}/api/v1/routes/transport-types`);
+        const response = await apiClient.get('/routes/transport-types');
         return {
             success: true,
             data: response.data.data
@@ -94,7 +92,7 @@ export const getTransportTypes = async () => {
  */
 export const calculateSegmentFare = async (transportType, distance, passengerType = 'regular') => {
     try {
-        const response = await axios.post(`${API_BASE_URL}/api/v1/routes/calculate-segment-fare`, {
+        const response = await apiClient.post('/routes/calculate-segment-fare', {
             transportType,
             distance,
             passengerType: passengerType.toLowerCase()

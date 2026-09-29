@@ -8,7 +8,7 @@ import { handleApiError, isBackendOffline } from '../utils/apiErrorHandler'
 
 // Create axios instance
 const apiClient = axios.create({
-    baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1',
+    baseURL: import.meta.env.VITE_API_URL || '/api/v1',
     timeout: 15000,
     headers: {
         'Content-Type': 'application/json'
@@ -103,7 +103,7 @@ apiClient.interceptors.response.use(
 // Health check function
 export const checkBackendHealth = async () => {
     try {
-        const response = await axios.get('http://localhost:5000/health', {
+        const response = await axios.get('/health', {
             timeout: 3000
         })
         return {

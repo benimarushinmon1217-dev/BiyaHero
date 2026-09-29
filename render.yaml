@@ -1,0 +1,57 @@
+services:
+  - type: web
+    name: biyahero-api
+    runtime: node
+    rootDir: backend
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: API_VERSION
+        value: v1
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "3306"
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_DIALECT
+        value: mysql
+      - key: DB_SSL
+        value: "false"
+      - key: DB_SSL_CA
+        sync: false
+      - key: DB_SSL_REJECT_UNAUTHORIZED
+        value: "true"
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: JWT_EXPIRE
+        value: 7d
+      - key: JWT_REFRESH_EXPIRE
+        value: 30d
+      - key: FRONTEND_URL
+        sync: false
+      - key: OPENROUTE_API_KEY
+        sync: false
+
+  - type: web
+    name: biyahero-frontend
+    runtime: static
+    rootDir: .
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_URL
+        sync: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

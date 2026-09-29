@@ -9,6 +9,8 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
+import sequelize from './config/database.js';
+import { ApiError } from './utils/ApiError.js';
 
 // Import middleware
 import { errorHandler, notFound } from './middleware/errorHandler.js';
@@ -26,27 +28,28 @@ const app = express();
 // Security middleware
 app.use(helmet());
 
-// CORS configuration - Allow multiple origins for development
-const allowedOrigins = [
-    'http://localhost:5173',  // Vite default
-    'http://localhost:3000',  // Vite config port
-    'http://localhost:3001',  // Alternative port
-    'http://localhost:5174',  // Vite alternative
+const configuredOrigins = (process.env.FRONTEND_URL || process.env.CORS_ORIGIN || '')
+    .split(',')
+    .map(origin => origin.trim().replace(/\/$/, ''))
+    .filter(Boolean);
+const developmentOrigins = process.env.NODE_ENV === 'development' ? [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:5174',
     'http://127.0.0.1:5173',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:3001'
-];
+] : [];
+const allowedOrigins = new Set([...configuredOrigins, ...developmentOrigins]);
 
 app.use(cors({
     origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps, Postman, curl)
         if (!origin) return callback(null, true);
-
-        // Check if origin is in allowed list
-        if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
+        if (allowedOrigins.has(origin)) {
             callback(null, true);
         } else {
-            callback(new Error('Not allowed by CORS'));
+            callback(new ApiError(403, 'Origin not allowed by CORS'));
         }
     },
     credentials: true,
@@ -64,6 +67,7 @@ app.use('/api/', limiter);
 // Body parser middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.set('trust proxy', 1);
 
 // Logging middleware
 if (process.env.NODE_ENV === 'development') {
@@ -76,27 +80,23 @@ app.get('/health', async (req, res) => {
 
     // Check database connection
     let dbStatus = 'disconnected';
-    let dbMessage = 'Database not configured';
+    let dbMessage = 'Database connection unavailable';
 
     try {
-        // Try to import sequelize if it exists
-        const { default: sequelize } = await import('./config/database.js').catch(() => ({ default: null }));
-
-        if (sequelize) {
-            await sequelize.authenticate();
-            dbStatus = 'connected';
-            dbMessage = 'Database connection successful';
-        }
+        await sequelize.authenticate();
+        dbStatus = 'connected';
+        dbMessage = 'Database connection successful';
     } catch (error) {
         dbStatus = 'error';
-        dbMessage = error.message;
+        dbMessage = 'Database connection failed';
+        console.error('Health check database connection failed:', error.message || error.name);
     }
 
     const responseTime = Date.now() - startTime;
 
     res.json({
         success: true,
-        status: 'healthy',
+        status: 'ok',
         message: 'BiyaHero API is running',
         timestamp: new Date().toISOString(),
         environment: process.env.NODE_ENV || 'development',

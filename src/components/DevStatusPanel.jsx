@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Server, Database, MapPin, Navigation, Wifi, WifiOff, X } from 'lucide-react'
-import axios from 'axios'
+import { checkBackendHealth } from '../api/axios'
 
 const DevStatusPanel = () => {
     const [isVisible, setIsVisible] = useState(true)
@@ -24,17 +24,17 @@ const DevStatusPanel = () => {
         // Check backend health
         const checkBackend = async () => {
             try {
-                const response = await axios.get('http://localhost:5000/health', {
-                    timeout: 3000
-                })
+                const health = await checkBackendHealth()
 
-                if (response.data.success) {
-                    setBackendInfo(response.data)
+                if (health.online && health.data.success) {
+                    setBackendInfo(health.data)
                     setStatus(prev => ({
                         ...prev,
                         backend: 'connected',
-                        database: response.data.database?.status === 'connected' ? 'connected' : 'disconnected'
+                        database: health.data.database?.status === 'connected' ? 'connected' : 'disconnected'
                     }))
+                } else {
+                    setStatus(prev => ({ ...prev, backend: 'disconnected', database: 'unknown' }))
                 }
             } catch (error) {
                 setStatus(prev => ({

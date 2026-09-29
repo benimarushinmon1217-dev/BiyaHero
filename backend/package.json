@@ -9,8 +9,7 @@
         "dev": "nodemon server.js",
         "mock": "node server.mock.js",
         "dev:mock": "nodemon server.mock.js",
-        "db:sync": "node scripts/syncDatabase.js",
-        "db:seed": "node scripts/seedDatabase.js"
+        "db:sync": "node scripts/syncDatabase.js"
     },
     "keywords": [
         "transportation",
@@ -19,6 +18,9 @@
         "sequelize",
         "mysql"
     ],
+    "engines": {
+        "node": ">=20"
+    },
     "author": "BiyaHero Team",
     "license": "MIT",
     "dependencies": {
@@ -37,5 +39,8 @@
     },
     "devDependencies": {
         "nodemon": "^3.0.2"
+    },
+    "overrides": {
+        "uuid": "^11.1.1"
     }
 }

@@ -8,6 +8,15 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+const sslOptions = process.env.DB_SSL === 'true'
+  ? {
+    rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false',
+    ...(process.env.DB_SSL_CA
+      ? { ca: process.env.DB_SSL_CA.replace(/\\n/g, '\n') }
+      : {})
+  }
+  : undefined;
+
 // Validate required environment variables
 const requiredEnvVars = ['DB_NAME', 'DB_USER', 'DB_HOST'];
 const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
@@ -43,7 +52,8 @@ const sequelize = new Sequelize(
     dialectOptions: {
       charset: 'utf8mb4',
       dateStrings: true,
-      typeCast: true
+      typeCast: true,
+      ...(sslOptions ? { ssl: sslOptions } : {})
     },
     timezone: '+08:00' // Philippine timezone
   }
