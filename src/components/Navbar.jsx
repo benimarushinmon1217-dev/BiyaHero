@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext'
 
 const Navbar = ({ darkMode, setDarkMode }) => {
     const location = useLocation()
-    const { logout } = useAuth()
+    const { logout, generatedRoute } = useAuth()
 
     const navItems = [
         { path: '/', icon: Home, label: 'Home' },
@@ -36,7 +36,7 @@ const Navbar = ({ darkMode, setDarkMode }) => {
 
                     {/* Desktop Navigation */}
                     <div className="hidden md:flex items-center space-x-1">
-                        {navItems.map((item) => {
+                        {navItems.filter(item => item.path !== '/route' || Boolean(generatedRoute)).map((item) => {
                             const Icon = item.icon
                             const isActive = location.pathname === item.path
                             return (
@@ -79,7 +79,7 @@ const Navbar = ({ darkMode, setDarkMode }) => {
                 {/* Mobile Navigation */}
                 <div className="md:hidden fixed bottom-0 left-0 right-0 glass-strong border-t border-gray-200 dark:border-gray-700 pb-safe">
                     <div className="flex items-center justify-around py-1">
-                        {navItems.map((item) => {
+                        {navItems.filter(item => item.path !== '/route' || Boolean(generatedRoute)).map((item) => {
                             const Icon = item.icon
                             const isActive = location.pathname === item.path
                             return (

@@ -7,11 +7,13 @@ export const AuthProvider = ({ children }) => {
     const [user, setUser] = useState(null)
     const [loading, setLoading] = useState(true)
     const [activeLocation, setActiveLocation] = useState(null)
+    const [generatedRoute, setGeneratedRoute] = useState(null)
 
     const logout = useCallback(() => {
         localStorage.removeItem('token')
         localStorage.removeItem('user')
         setUser(null)
+        setGeneratedRoute(null)
     }, [])
 
     useEffect(() => {
@@ -68,12 +70,14 @@ export const AuthProvider = ({ children }) => {
         isAuthenticated: Boolean(user),
         activeLocation,
         setActiveLocation,
+        generatedRoute,
+        setGeneratedRoute,
         savePreferences,
         login: details => authenticate('login', details),
         register: details => authenticate('register', details),
         logout,
         setUser
-    }), [user, loading, authenticate, logout, activeLocation, savePreferences])
+    }), [user, loading, authenticate, logout, activeLocation, generatedRoute, savePreferences])
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

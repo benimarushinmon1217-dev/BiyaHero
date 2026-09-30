@@ -84,7 +84,7 @@ const SelectedPlaceDetails = ({ label, place, fallbackName, nearbyPlace, nearbyS
 }
 
 const RouteResultsMultiModal = () => {
-    const { user, setActiveLocation, savePreferences } = useAuth();
+    const { user, setActiveLocation, savePreferences, generatedRoute, setGeneratedRoute } = useAuth()
     const location = useLocation();
     const navigate = useNavigate();
     const [routes, setRoutes] = useState([]);
@@ -106,12 +106,13 @@ const RouteResultsMultiModal = () => {
     const [savingPreferences, setSavingPreferences] = useState(false);
     const [preferenceError, setPreferenceError] = useState('');
 
+    const routeState = location.state || generatedRoute || {}
     const {
         origin,
         destination,
         originPlace: rawOriginPlace,
         destinationPlace: rawDestinationPlace
-    } = location.state || {};
+    } = routeState
     const {
         place: originPlace,
         corrected: originPlaceCorrected
@@ -121,7 +122,7 @@ const RouteResultsMultiModal = () => {
         corrected: destinationPlaceCorrected
     } = useMemo(() => reconcileKnownPlaceLocation(rawDestinationPlace), [rawDestinationPlace]);
     const selectedPlaceCorrected = originPlaceCorrected || destinationPlaceCorrected;
-    const routePreview = location.state?.routePreview;
+    const routePreview = routeState.routePreview
 
     const changePreference = async (preference, value) => {
         setSavingPreferences(true);
@@ -214,6 +215,7 @@ const RouteResultsMultiModal = () => {
         setNoRouteMessage('');
         setFallbackRoadRoute(null);
         setMotorcycleTaxiMessage('');
+        if (location.state) setGeneratedRoute(null)
 
         try {
             const result = await getRoutePlan(
@@ -231,6 +233,18 @@ const RouteResultsMultiModal = () => {
             }
 
             const plan = result.data;
+            const hasGeneratedRoute = plan.road?.status === 'available' ||
+                (plan.publicTransit?.status === 'available' &&
+                    Array.isArray(plan.publicTransit.routes) && plan.publicTransit.routes.length > 0)
+            if (hasGeneratedRoute) {
+                setGeneratedRoute({
+                    origin,
+                    destination,
+                    originPlace,
+                    destinationPlace,
+                    userCoords: routeState.userCoords
+                })
+            }
             setMotorcycleTaxiMessage(plan.motorcycleTaxi?.message || 'Motorcycle taxi options are not configured in BiyaHero yet.');
             const road = plan.road;
             if (road.status === 'available') {

@@ -38,7 +38,6 @@ const Profile = () => {
                 preferences,
                 user: { ...previous.user, ...preferences }
             }))
-            setUser(previous => ({ ...previous, ...preferences }))
             setPreferenceMessage('Preference saved.')
         } catch (requestError) {
             setPreferenceMessage(requestError.friendlyMessage || 'Unable to save this preference.')
