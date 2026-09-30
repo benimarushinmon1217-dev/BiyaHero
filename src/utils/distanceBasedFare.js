@@ -1,10 +1,9 @@
-// Distance-Based Fare Calculator for BiyaHero
-// Uses actual route distance from OpenRouteService
-// Implements Philippine public transportation fare logic
+// Distance-based fare reference for BiyaHero estimates.
 
-// Official Fare Rules
+// Reference values; actual fares depend on the operator and route.
 export const FARE_RULES = {
-    BASE_FARE: 12,           // ₱12 minimum fare
+    BASE_FARE: 15,           // ₱15 regular minimum fare
+    STUDENT_MINIMUM_FARE: 12,
     BASE_DISTANCE: 5,        // First 5 kilometers
     ADDITIONAL_PER_KM: 1,    // ₱1 per kilometer after 5 KM
 }
@@ -48,14 +47,14 @@ export const applyDiscount = (regularFare, commuterType = 'REGULAR') => {
     const discountRate = DISCOUNT_RATES[commuterType] || 0
 
     if (discountRate === 0) {
-        return regularFare
+        return Math.max(FARE_RULES.BASE_FARE, regularFare)
     }
 
     // Apply discount: fare × (1 - discount rate)
     const discountedFare = regularFare * (1 - discountRate)
 
     // Round to nearest peso for realistic commuting behavior
-    return Math.round(discountedFare)
+    return Math.max(FARE_RULES.STUDENT_MINIMUM_FARE, Math.round(discountedFare))
 }
 
 /**

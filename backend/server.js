@@ -28,7 +28,7 @@ const startServer = async () => {
 
         // Sync database models
         console.log('🔄 Synchronizing database models...');
-        await syncDatabase();
+        await syncDatabase({ alter: process.env.DB_SYNC_ALTER === 'true' });
 
         // Start Express server
         app.listen(PORT, '0.0.0.0', () => {

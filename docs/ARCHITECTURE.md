@@ -17,7 +17,8 @@ BiyaHero is a modern web application built with React + Vite that provides intel
 
 ### Backend Services
 - **Routing**: OSRM (Open Source Routing Machine)
-- **Geocoding**: Nominatim (OpenStreetMap)
+- **Geocoding**: Nominatim (OpenStreetMap) for place search and reverse geocoding
+- **Transit geometry**: source-verified, direction-ordered transit shapes only; road-router output is not treated as a transit route
 - **Server**: Express.js (Node.js)
 
 ---
@@ -134,7 +135,8 @@ Validated Coordinates → OSRM API → Road Geometry → Distance Calculation
 
 **Formula:**
 ```
-Base Fare: ₱12 (first 5 km)
+Regular Base Fare: ₱15 (first 5 km)
+Student Minimum Fare: ₱12 (20% discount)
 Additional: ₱1 per km after 5 km
 Discount: 20% for Student/Senior/PWD
 ```
@@ -341,12 +343,12 @@ biyahero/
 - Modern build tooling
 - Excellent DX
 
-### Why Leaflet over Google Maps?
+### Why Leaflet?
 - Free and open source
 - No API key required
 - Customizable
 
-### Why OSRM over Google Directions?
+### Why OSRM for road-route references?
 - Free and open source
 - Accurate road following
 - No API key required

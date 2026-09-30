@@ -1,8 +1,20 @@
 // Route Service for BiyaHero
 // Integrates with OpenRouteService (OSRM) to get actual route distances
-// Provides real road-following geometry for accurate fare calculation
+// Provides road-following geometry for in-app route references and fare estimates
 
-import { getLocationByName } from './searchService'
+import { getLocationByName } from './searchService.js'
+import { fromGeoJSONCoordinate, normalizeCoordinates, toLeafletCoordinate } from '../utils/coordinates.js'
+
+const distanceBetweenCoordinates = (first, second) => {
+    const radians = degrees => degrees * (Math.PI / 180)
+    const latitudeDifference = radians(second.lat - first.lat)
+    const longitudeDifference = radians(second.lng - first.lng)
+    const latitude1 = radians(first.lat)
+    const latitude2 = radians(second.lat)
+    const haversine = Math.sin(latitudeDifference / 2) ** 2
+        + Math.cos(latitude1) * Math.cos(latitude2) * Math.sin(longitudeDifference / 2) ** 2
+    return 6371 * 2 * Math.atan2(Math.sqrt(haversine), Math.sqrt(1 - haversine))
+}
 
 /**
  * Get route from OSRM (Open Source Routing Machine)
@@ -13,10 +25,16 @@ import { getLocationByName } from './searchService'
  */
 export const getRouteFromOSRM = async (start, end) => {
     try {
+        const startCoordinate = normalizeCoordinates(start)
+        const endCoordinate = normalizeCoordinates(end)
+        if (!startCoordinate || !endCoordinate) {
+            return { success: false, error: 'Valid start and destination coordinates are required.' }
+        }
         // OSRM public API endpoint
-        const url = `https://router.project-osrm.org/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson`
+        const url = `https://router.project-osrm.org/route/v1/driving/${startCoordinate.longitude},${startCoordinate.latitude};${endCoordinate.longitude},${endCoordinate.latitude}?overview=full&geometries=geojson`
 
         const response = await fetch(url)
+        if (!response.ok) throw new Error(`Road router returned HTTP ${response.status}`)
         const data = await response.json()
 
         if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
@@ -28,8 +46,25 @@ export const getRouteFromOSRM = async (start, end) => {
             // Duration in seconds, convert to minutes
             const durationMinutes = Math.round(route.duration / 60)
 
-            // Geometry coordinates [lng, lat] -> convert to [lat, lng] for Leaflet
-            const coordinates = route.geometry.coordinates.map(coord => [coord[1], coord[0]])
+            // GeoJSON is [longitude, latitude]; convert through canonical points for Leaflet.
+            const coordinates = route.geometry.coordinates
+                .map(fromGeoJSONCoordinate)
+                .map(toLeafletCoordinate)
+                .filter(Boolean)
+            if (coordinates.length < 2) {
+                return { success: false, error: 'Road router returned incomplete route geometry.' }
+            }
+            const firstPoint = { lat: coordinates[0][0], lng: coordinates[0][1] }
+            const lastPoint = { lat: coordinates[coordinates.length - 1][0], lng: coordinates[coordinates.length - 1][1] }
+            if (distanceBetweenCoordinates(
+                { lat: startCoordinate.latitude, lng: startCoordinate.longitude },
+                firstPoint
+            ) > 0.25 || distanceBetweenCoordinates(
+                { lat: endCoordinate.latitude, lng: endCoordinate.longitude },
+                lastPoint
+            ) > 0.25) {
+                return { success: false, error: 'Road route does not reach the selected locations closely enough.' }
+            }
 
             return {
                 success: true,

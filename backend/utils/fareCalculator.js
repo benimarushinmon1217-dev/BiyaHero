@@ -7,9 +7,15 @@
  * Base fare configuration
  */
 const FARE_CONFIG = {
-    baseFare: 12,           // ₱12 for first 5km
+    baseFare: 15,           // ₱15 regular fare for the first 5km
     baseDistance: 5,        // First 5 kilometers
     additionalPerKm: 1,     // ₱1 per km after 5km
+    minimumFares: {
+        regular: 15,
+        student: 12,
+        senior: 12,
+        pwd: 12
+    },
     discounts: {
         regular: 0,           // 0% discount
         student: 0.20,        // 20% discount
@@ -24,18 +30,24 @@ const FARE_CONFIG = {
  * @param {string} passengerType - Passenger type (regular, student, senior, pwd)
  * @returns {number} Calculated fare in PHP
  */
-export const calculateFare = (distanceKm, passengerType = 'regular') => {
+export const calculateFare = (
+    distanceKm,
+    passengerType = 'regular',
+    baseFare = FARE_CONFIG.baseFare,
+    ratePerKm = FARE_CONFIG.additionalPerKm,
+    baseDistance = FARE_CONFIG.baseDistance
+) => {
     if (!distanceKm || distanceKm <= 0) {
         return 0;
     }
 
     // Calculate base fare
-    let fare = FARE_CONFIG.baseFare;
+    let fare = Math.max(Number(baseFare), FARE_CONFIG.baseFare);
 
     // Add additional fare for distance beyond base distance
-    if (distanceKm > FARE_CONFIG.baseDistance) {
-        const additionalDistance = distanceKm - FARE_CONFIG.baseDistance;
-        fare += Math.round(additionalDistance) * FARE_CONFIG.additionalPerKm;
+    if (distanceKm > baseDistance) {
+        const additionalDistance = distanceKm - baseDistance;
+        fare += Math.ceil(additionalDistance) * Number(ratePerKm);
     }
 
     // Apply discount based on passenger type
@@ -45,7 +57,8 @@ export const calculateFare = (distanceKm, passengerType = 'regular') => {
     }
 
     // Round to nearest peso
-    return Math.round(fare);
+    const minimumFare = FARE_CONFIG.minimumFares[passengerType] || FARE_CONFIG.minimumFares.regular;
+    return Math.max(minimumFare, Math.round(fare));
 };
 
 /**
@@ -68,31 +81,42 @@ export const calculateAllFares = (distanceKm) => {
  * @param {string} passengerType - Passenger type
  * @returns {Object} Detailed fare breakdown
  */
-export const getFareBreakdown = (distanceKm, passengerType = 'regular') => {
-    const baseFare = FARE_CONFIG.baseFare;
-    const additionalDistance = Math.max(0, distanceKm - FARE_CONFIG.baseDistance);
-    const additionalFare = Math.round(additionalDistance) * FARE_CONFIG.additionalPerKm;
-    const subtotal = baseFare + additionalFare;
+export const getFareBreakdown = (
+    distanceKm,
+    passengerType = 'regular',
+    { baseFare = FARE_CONFIG.baseFare, ratePerKm = FARE_CONFIG.additionalPerKm, baseDistance = FARE_CONFIG.baseDistance } = {}
+) => {
+    const additionalDistance = Math.max(0, distanceKm - baseDistance);
+    const effectiveBaseFare = Math.max(Number(baseFare), FARE_CONFIG.baseFare);
+    const additionalFare = Math.ceil(additionalDistance) * ratePerKm;
+    const subtotal = effectiveBaseFare + additionalFare;
     const discount = FARE_CONFIG.discounts[passengerType] || 0;
     const discountAmount = Math.round(subtotal * discount);
-    const total = subtotal - discountAmount;
+    const total = calculateFare(distanceKm, passengerType, effectiveBaseFare, ratePerKm, baseDistance);
 
     return {
         distance: distanceKm,
-        baseFare,
-        additionalDistance: Math.round(additionalDistance),
+        baseFare: effectiveBaseFare,
+        additionalDistance: Math.ceil(additionalDistance),
         additionalFare,
         subtotal,
         passengerType,
         discountPercent: discount * 100,
         discountAmount,
-        total
+        total,
+        ratePerKm
     };
+};
+
+export const calculateSegmentFare = (distanceKm, passengerType = 'regular', transportType = 'jeepney') => {
+    const fare = getFareBreakdown(distanceKm, passengerType);
+    return { ...fare, transportType, segmentCount: 1 };
 };
 
 export default {
     calculateFare,
     calculateAllFares,
     getFareBreakdown,
+    calculateSegmentFare,
     FARE_CONFIG
 };

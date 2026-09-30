@@ -41,7 +41,8 @@ Intelligent route finding system that provides multiple route options based on d
 - Transportation type recommendations
 
 **APIs Used:**
-- Nominatim (OpenStreetMap) - Geocoding
+- Nominatim (OpenStreetMap) - place search and selected-place coordinates
+- OSRM - in-app road-route reference, not a public-transit itinerary
 - Custom route generation algorithm
 
 **UI Components:**
@@ -794,12 +795,11 @@ Firebase/Supabase integration for data persistence.
 
 ## 🔌 API Integrations
 
-### 1. OpenStreetMap (Nominatim)
-**Status:** ✅ Completed  
-**Completion:** 100%
+### 1. OpenStreetMap place search and geocoding
+**Status:** ✅ Implemented
 
 **Description:**  
-Geocoding and reverse geocoding service.
+Nominatim provides Batangas-scoped place suggestions and reverse geocoding. The selected result's coordinates are retained for the in-app Leaflet map and route request. If no verified transit itinerary exists, OSRM road geometry is shown only as a driving reference; distance-based fares are estimates, not confirmed operator fares.
 
 **Usage:**
 - Address to coordinates
@@ -809,10 +809,10 @@ Geocoding and reverse geocoding service.
 **Endpoints:**
 - `https://nominatim.openstreetmap.org/search`
 - `https://nominatim.openstreetmap.org/reverse`
+- `https://router.project-osrm.org/route/v1/driving`
 
 **Rate Limits:**
-- 1 request per second
-- Free tier
+- Nominatim usage policy applies; search requests are debounced in the UI.
 
 **Implementation:**
 - `src/components/SearchBar.jsx`

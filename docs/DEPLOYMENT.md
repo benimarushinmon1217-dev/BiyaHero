@@ -15,6 +15,8 @@ Do not deploy the legacy root `server/index.js`; it is a mock API. The productio
 
 After creating the services, set the backend's `FRONTEND_URL` to the actual public frontend origin. Set the frontend's `VITE_API_URL` to the actual backend origin followed by `/api/v1`, for example `https://<api-service>.onrender.com/api/v1`. Rebuild the frontend after changing this public build-time variable.
 
+Place search and reverse geocoding use Nominatim, with map tiles from OpenStreetMap. Route previews use OSRM road geometry only as an in-app road reference; it does not establish a public-transit itinerary or fare. No external map handoff or provider key is required.
+
 ## Backend Environment
 
 Render supplies `PORT`; do not set a fixed production port. Configure these on the API service:
@@ -32,6 +34,7 @@ Render supplies `PORT`; do not set a fixed production port. Configure these on t
 | `DB_SSL` | `true` if required by the database provider, otherwise `false` |
 | `DB_SSL_CA` | Optional CA certificate when required for MySQL TLS |
 | `DB_SSL_REJECT_UNAUTHORIZED` | Keep `true` for certificate verification |
+| `DB_SYNC_ALTER` | Set to `true` only during a reviewed schema update; defaults to `false` |
 | `JWT_SECRET` | Random secret, at least 32 characters |
 | `JWT_REFRESH_SECRET` | A separate random secret, at least 32 characters |
 | `JWT_EXPIRE` | Access-token lifetime; default `7d` |
@@ -45,11 +48,11 @@ The external database provider must allow connections from Render's outbound IP 
 
 ## Schema Initialization
 
-The repository has Sequelize models but no migration framework or seed data. Production startup uses `sequelize.sync()` with `alter: false`, which can create missing model tables but does not alter existing tables. For an explicit initialization, run `npm run db:sync` from `backend/` with the intended database environment. Review existing production schema before running it; it is not a replacement for versioned migrations.
+The repository has Sequelize models but no migration framework or seed data. Production startup creates missing Sequelize model tables but does not alter existing tables by default. The saved-place and trip-history additions therefore require a reviewed schema update on an existing database. After backing up and reviewing the target schema, set `DB_SYNC_ALTER=true` and run `npm run db:sync` from `backend/`; then return the setting to `false`. This uses the existing Sequelize models and `sync({ alter: true })`; review its proposed production impact before running it.
 
 ## Frontend and Authentication
 
-The frontend reads the public `VITE_API_URL` at build time. It contains only the API URL, never database credentials or JWT signing keys. Authentication uses bearer JWTs in the `Authorization` header; tokens are stored in browser `localStorage`, not cookies. The API issues refresh tokens but currently has no refresh-token endpoint or server-side logout endpoint.
+The frontend reads `VITE_API_URL` at build time. This is a public browser value; never put database credentials or JWT signing keys in frontend variables. Authentication uses bearer JWTs in the `Authorization` header; tokens are stored in browser `localStorage`, not cookies. The API issues refresh tokens but currently has no refresh-token endpoint or server-side logout endpoint.
 
 Production CORS permits the configured `FRONTEND_URL`. Local development origins are allowed only when `NODE_ENV=development`.
 
@@ -71,4 +74,4 @@ npm run dev
 
 Check the API at `https://<api-service>.onrender.com/health`. The response reports application and database status without returning credentials. A healthy frontend build is produced by `npm run build`.
 
-Known pre-deployment follow-ups: provide and verify the external MySQL connection/TLS configuration; confirm the database schema against Sequelize models; and implement or remove the frontend `calculateSegmentFare` call, whose matching API route is currently absent.
+Known pre-deployment follow-ups: provide and verify the external MySQL connection/TLS configuration and review the database schema update before deployment.

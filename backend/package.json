@@ -9,7 +9,8 @@
         "dev": "nodemon server.js",
         "mock": "node server.mock.js",
         "dev:mock": "nodemon server.mock.js",
-        "db:sync": "node scripts/syncDatabase.js"
+        "db:sync": "node scripts/syncDatabase.js",
+        "test": "node --test"
     },
     "keywords": [
         "transportation",

@@ -7,6 +7,8 @@
 import { TransportHub, TransportRoute } from '../models/index.js';
 import { calculateFare } from '../utils/fareCalculator.js';
 import { getRoute } from './routingService.js';
+import { generateRealisticRoutes } from './realisticRoutingService.js';
+import { KNOWN_PLACE_LOCATIONS } from '../../shared/knownPlaceLocations.js';
 import {
     LIPA_JEEPNEY_ROUTES,
     LIPA_TRANSFER_HUBS,
@@ -92,8 +94,8 @@ const MAJOR_HUBS = [
         id: 'hub-sm-lipa',
         name: 'SM Lipa',
         displayName: 'SM City Lipa',
-        lat: 13.9380,
-        lng: 121.1625,
+        lat: KNOWN_PLACE_LOCATIONS.smCityLipa.latitude,
+        lng: KNOWN_PLACE_LOCATIONS.smCityLipa.longitude,
         importance: 9,
         availableTransport: ['jeepney', 'tricycle', 'bus']
     },
@@ -605,73 +607,7 @@ const generateRealisticLipaRoute = async (origin, destination, passengerType = '
  * Main function: Generate multiple commute options
  */
 export const generateMultiModalRoutes = async (origin, destination, passengerType = 'regular', options = {}) => {
-    try {
-        const routes = [];
-
-        // Try realistic Lipa City routes first
-        const realisticRoute = await generateRealisticLipaRoute(origin, destination, passengerType);
-        if (realisticRoute) {
-            realisticRoute.recommended = true;
-            realisticRoute.recommendationReason = 'Based on actual Lipa City jeepney routes';
-            routes.push(realisticRoute);
-        }
-
-        // Option 1: Direct Route (Fallback if no realistic route)
-        if (routes.length === 0) {
-            const directRoute = await generateDirectRoute(origin, destination, passengerType);
-            if (directRoute) {
-                directRoute.recommended = true;
-                directRoute.recommendationReason = 'Cheapest option with no transfers';
-                routes.push(directRoute);
-            }
-        }
-
-        // Find intermediate hubs for additional options
-        const originHub = findNearestHub(origin.lat, origin.lng);
-        const destHub = findNearestHub(destination.lat, destination.lng);
-
-        // Option 2: Hybrid Route (Most Convenient)
-        if (originHub && originHub.importance >= 7 && routes.length < 3) {
-            const hybridRoute = await generateHybridRoute(origin, destination, originHub, passengerType);
-            if (hybridRoute) {
-                hybridRoute.recommended = false;
-                hybridRoute.recommendationReason = 'Convenient with flexible transport';
-                routes.push(hybridRoute);
-            }
-        }
-
-        // Sort routes by preference
-        const sortedRoutes = routes.sort((a, b) => {
-            if (options.preference === 'cheapest') return a.totalFare - b.totalFare;
-            if (options.preference === 'fastest') return a.totalDuration - b.totalDuration;
-            if (options.preference === 'least_transfers') return a.totalTransfers - b.totalTransfers;
-            return 0; // Default order
-        });
-
-        return {
-            success: true,
-            origin: {
-                name: origin.name,
-                lat: origin.lat,
-                lng: origin.lng
-            },
-            destination: {
-                name: destination.name,
-                lat: destination.lat,
-                lng: destination.lng
-            },
-            passengerType,
-            totalRoutes: sortedRoutes.length,
-            routes: sortedRoutes,
-            nearestHubs: {
-                origin: originHub,
-                destination: destHub
-            }
-        };
-    } catch (error) {
-        console.error('Error generating multi-modal routes:', error);
-        throw new Error('Failed to generate multi-modal routes');
-    }
+    return generateRealisticRoutes(origin, destination, passengerType, options);
 };
 
 export default {

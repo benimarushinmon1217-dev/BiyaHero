@@ -16,6 +16,7 @@
  * - The transfer point is legitimate
  * - The pattern is culturally accurate
  */
+import { KNOWN_PLACE_LOCATIONS } from '../../shared/knownPlaceLocations.js';
 
 /**
  * LEGITIMATE TRANSFER HUBS
@@ -59,8 +60,8 @@ export const LEGITIMATE_TRANSFER_HUBS = {
         name: 'SM City Lipa',
         aliases: ['SM Lipa', 'SM'],
         displayName: 'SM City Lipa Terminal',
-        lat: 13.9380,
-        lng: 121.1625,
+        lat: KNOWN_PLACE_LOCATIONS.smCityLipa.latitude,
+        lng: KNOWN_PLACE_LOCATIONS.smCityLipa.longitude,
         type: 'mall_terminal',
         importance: 9,
         description: 'Major shopping mall with dedicated jeepney terminal.',
@@ -168,7 +169,7 @@ export const JEEPNEY_ROUTES = {
             { name: 'Lipa Cathedral', lat: 13.9405, lng: 121.1655, isTerminal: true, isTransferHub: true },
             { name: 'Lipa Sabang', lat: 13.9420, lng: 121.1670, isTerminal: false, isTransferHub: true },
             { name: 'Robinsons Place Lipa', lat: 13.9370, lng: 121.1640, isTerminal: false, isTransferHub: true },
-            { name: 'SM City Lipa', lat: 13.9380, lng: 121.1625, isTerminal: true, isTransferHub: true }
+            { name: 'SM City Lipa', lat: KNOWN_PLACE_LOCATIONS.smCityLipa.latitude, lng: KNOWN_PLACE_LOCATIONS.smCityLipa.longitude, isTerminal: true, isTransferHub: true }
         ],
 
         frequency: 'very_high', // Every 3-5 minutes

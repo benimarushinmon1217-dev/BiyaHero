@@ -5,6 +5,11 @@
 
 import axios from 'axios';
 import dotenv from 'dotenv';
+import {
+    normalizeCoordinates,
+    toGeoJSONCoordinate,
+    validateRouteGeometryEndpoints
+} from '../utils/coordinates.js';
 
 dotenv.config();
 
@@ -13,6 +18,19 @@ const OPENROUTE_BASE_URL = process.env.OPENROUTE_BASE_URL || 'https://api.openro
 
 // Fallback to OSRM if OpenRouteService is not configured
 const OSRM_BASE_URL = 'https://router.project-osrm.org';
+const normalizeRouteGeometry = (coordinates, start, end, source) => {
+    const result = validateRouteGeometryEndpoints(coordinates, start, end);
+    console.info('Road route endpoint validation:', {
+        source,
+        requestedOrigin: start,
+        actualRouteOrigin: result.geometry[0],
+        requestedDestination: end,
+        actualRouteDestination: result.geometry[result.geometry.length - 1],
+        startSnapMeters: Math.round(result.startSnapMeters),
+        endSnapMeters: Math.round(result.endSnapMeters)
+    });
+    return result;
+};
 
 /**
  * Get route using OpenRouteService
@@ -21,21 +39,27 @@ const OSRM_BASE_URL = 'https://router.project-osrm.org';
  * @returns {Promise<Object>} Route data
  */
 export const getRoute = async (start, end) => {
+    const normalizedStart = normalizeCoordinates(start);
+    const normalizedEnd = normalizeCoordinates(end);
+    if (!normalizedStart || !normalizedEnd) {
+        throw new Error('Routing requires finite latitude and longitude coordinates');
+    }
+
     try {
         // Use OpenRouteService if API key is available
         if (OPENROUTE_API_KEY) {
-            return await getRouteFromOpenRoute(start, end);
+            return await getRouteFromOpenRoute(normalizedStart, normalizedEnd);
         }
 
         // Fallback to OSRM (free, no API key required)
-        return await getRouteFromOSRM(start, end);
+        return await getRouteFromOSRM(normalizedStart, normalizedEnd);
     } catch (error) {
         console.error('Routing error:', error.message);
 
         // Try fallback if primary fails
         if (OPENROUTE_API_KEY) {
             console.log('Falling back to OSRM...');
-            return await getRouteFromOSRM(start, end);
+            return await getRouteFromOSRM(normalizedStart, normalizedEnd);
         }
 
         throw error;
@@ -51,10 +75,7 @@ const getRouteFromOpenRoute = async (start, end) => {
     const response = await axios.post(
         url,
         {
-            coordinates: [
-                [start.lng, start.lat],
-                [end.lng, end.lat]
-            ],
+            coordinates: [toGeoJSONCoordinate(start), toGeoJSONCoordinate(end)],
             format: 'geojson',
             instructions: true,
             elevation: false
@@ -70,12 +91,20 @@ const getRouteFromOpenRoute = async (start, end) => {
     const route = response.data.features[0];
     const properties = route.properties;
     const segments = properties.segments[0];
+    const normalizedGeometry = normalizeRouteGeometry(
+        route.geometry.coordinates,
+        start,
+        end,
+        'OpenRouteService'
+    );
 
     return {
         success: true,
         distance: (properties.summary.distance / 1000).toFixed(2), // Convert to km
         duration: Math.round(properties.summary.duration / 60), // Convert to minutes
-        geometry: route.geometry.coordinates.map(coord => [coord[1], coord[0]]), // [lat, lng]
+        geometry: normalizedGeometry.geometry,
+        startSnapMeters: normalizedGeometry.startSnapMeters,
+        endSnapMeters: normalizedGeometry.endSnapMeters,
         steps: segments.steps.map(step => ({
             instruction: step.instruction,
             distance: (step.distance / 1000).toFixed(2),
@@ -89,7 +118,7 @@ const getRouteFromOpenRoute = async (start, end) => {
  * Get route from OSRM (fallback)
  */
 const getRouteFromOSRM = async (start, end) => {
-    const url = `${OSRM_BASE_URL}/route/v1/driving/${start.lng},${start.lat};${end.lng},${end.lat}?overview=full&geometries=geojson&steps=true`;
+    const url = `${OSRM_BASE_URL}/route/v1/driving/${toGeoJSONCoordinate(start).join(',')};${toGeoJSONCoordinate(end).join(',')}?overview=full&geometries=geojson&steps=true`;
 
     const response = await axios.get(url);
 
@@ -98,18 +127,27 @@ const getRouteFromOSRM = async (start, end) => {
     }
 
     const route = response.data.routes[0];
+    const normalizedGeometry = normalizeRouteGeometry(
+        route.geometry.coordinates,
+        start,
+        end,
+        'OSRM driving'
+    );
 
     return {
         success: true,
         distance: (route.distance / 1000).toFixed(2), // Convert to km
         duration: Math.round(route.duration / 60), // Convert to minutes
-        geometry: route.geometry.coordinates.map(coord => [coord[1], coord[0]]), // [lat, lng]
+        geometry: normalizedGeometry.geometry,
+        startSnapMeters: normalizedGeometry.startSnapMeters,
+        endSnapMeters: normalizedGeometry.endSnapMeters,
+        source: 'osrm-driving',
         steps: route.legs[0].steps.map(step => ({
             instruction: step.maneuver.type,
             distance: (step.distance / 1000).toFixed(2),
             duration: Math.round(step.duration / 60)
         })),
-        source: 'osrm'
+        source: 'osrm-driving'
     };
 };
 

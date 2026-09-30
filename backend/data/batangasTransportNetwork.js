@@ -1,23 +1,15 @@
 /**
  * BATANGAS PROVINCE TRANSPORTATION NETWORK
  * 
- * Comprehensive, realistic transportation intelligence for Batangas Province
- * 
- * This is NOT just a route database.
- * This is a COMMUTER BEHAVIOR SIMULATION SYSTEM.
- * 
- * Every route here represents:
- * - Actual commuter behavior
- * - Real jeepney corridors
- * - Legitimate transfer patterns
- * - Local transportation culture
+ * Candidate transportation hubs for Batangas Province.
+ * These records lack authoritative provenance and must not be advertised as verified hubs.
  */
+import { KNOWN_PLACE_LOCATIONS } from '../../shared/knownPlaceLocations.js';
 
 /**
- * MAJOR TRANSPORT HUBS - BATANGAS PROVINCE
- * These are the REAL hubs where commuters actually transfer
+ * MAJOR TRANSPORT HUB CANDIDATES - BATANGAS PROVINCE
  */
-export const BATANGAS_TRANSPORT_HUBS = {
+const HUB_DEFINITIONS = {
     // LIPA CITY HUBS
     'lipa-cathedral': {
         id: 'lipa-cathedral',
@@ -74,8 +66,8 @@ export const BATANGAS_TRANSPORT_HUBS = {
         aliases: ['SM Lipa', 'SM', 'SM City'],
         displayName: 'SM City Lipa Terminal',
         municipality: 'Lipa City',
-        lat: 13.9380,
-        lng: 121.1625,
+        lat: KNOWN_PLACE_LOCATIONS.smCityLipa.latitude,
+        lng: KNOWN_PLACE_LOCATIONS.smCityLipa.longitude,
         type: 'mall_terminal',
         importance: 9,
         description: 'Major shopping mall with dedicated jeepney terminal.',
@@ -296,6 +288,17 @@ export const BATANGAS_TRANSPORT_HUBS = {
         rushHourTraffic: 'low'
     }
 };
+
+export const BATANGAS_TRANSPORT_HUBS = Object.fromEntries(
+    Object.entries(HUB_DEFINITIONS).map(([hubId, hub]) => [hubId, {
+        ...hub,
+        verificationStatus: hub.verificationStatus || 'unverified',
+        verificationSource: hub.verificationSource || null
+    }])
+);
+
+export const isVerifiedTransportHub = hub =>
+    hub?.verificationStatus === 'verified' && Boolean(hub.verificationSource);
 
 /**
  * ROUTE TAGS - For route classification and user guidance

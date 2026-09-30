@@ -1,18 +1,14 @@
 /**
  * BATANGAS JEEPNEY ROUTES - EXPANDED
  * 
- * Comprehensive jeepney route database for Batangas Province
- * Each route represents ACTUAL jeepney corridors that exist
+ * Candidate jeepney route records for Batangas Province.
+ * These records lack authoritative provenance and must not be routed as verified service.
  * 
- * Route Realism Criteria:
- * - Route actually exists
- * - Commuters actually use it
- * - Stops are in correct order
- * - Operating hours are realistic
- * - Fares match actual rates
+ * Route records remain unverified until supported by a cited transit source or field validation.
  */
+import { KNOWN_PLACE_LOCATIONS } from '../../shared/knownPlaceLocations.js';
 
-export const BATANGAS_JEEPNEY_ROUTES = {
+const ROUTE_DEFINITIONS = {
     // ========================================
     // LIPA CITY ROUTES
     // ========================================
@@ -62,7 +58,7 @@ export const BATANGAS_JEEPNEY_ROUTES = {
             { name: 'Lipa Cathedral', lat: 13.9405, lng: 121.1655, isTerminal: true, isTransferHub: true },
             { name: 'Lipa Sabang', lat: 13.9420, lng: 121.1670, isTerminal: false, isTransferHub: true },
             { name: 'Robinsons Place Lipa', lat: 13.9370, lng: 121.1640, isTerminal: false, isTransferHub: true },
-            { name: 'SM City Lipa', lat: 13.9380, lng: 121.1625, isTerminal: true, isTransferHub: true }
+            { name: 'SM City Lipa', lat: KNOWN_PLACE_LOCATIONS.smCityLipa.latitude, lng: KNOWN_PLACE_LOCATIONS.smCityLipa.longitude, isTerminal: true, isTransferHub: true }
         ],
 
         frequency: 'very_high',
@@ -223,7 +219,7 @@ export const BATANGAS_JEEPNEY_ROUTES = {
 
         stops: [
             { name: 'Tanauan City Hall', lat: 14.0858, lng: 121.1500, isTerminal: true, isTransferHub: true },
-            { name: 'SM City Lipa', lat: 13.9380, lng: 121.1625, isTerminal: true, isTransferHub: true }
+            { name: 'SM City Lipa', lat: KNOWN_PLACE_LOCATIONS.smCityLipa.latitude, lng: KNOWN_PLACE_LOCATIONS.smCityLipa.longitude, isTerminal: true, isTransferHub: true }
         ],
 
         frequency: 'medium',
@@ -287,7 +283,7 @@ export const BATANGAS_JEEPNEY_ROUTES = {
 
         stops: [
             { name: 'Rosario Town Center', lat: 13.8458, lng: 121.2042, isTerminal: true, isTransferHub: true },
-            { name: 'SM City Lipa', lat: 13.9380, lng: 121.1625, isTerminal: true, isTransferHub: true }
+            { name: 'SM City Lipa', lat: KNOWN_PLACE_LOCATIONS.smCityLipa.latitude, lng: KNOWN_PLACE_LOCATIONS.smCityLipa.longitude, isTerminal: true, isTransferHub: true }
         ],
 
         frequency: 'medium',
@@ -413,13 +409,34 @@ export const BATANGAS_JEEPNEY_ROUTES = {
     }
 };
 
+export const BATANGAS_JEEPNEY_ROUTES = Object.fromEntries(
+    Object.entries(ROUTE_DEFINITIONS).map(([routeId, route]) => [routeId, {
+        ...route,
+        verificationStatus: route.verificationStatus || 'unverified',
+        verificationSource: route.verificationSource || null,
+        stopCoordinatesVerificationStatus: route.stopCoordinatesVerificationStatus || 'unverified',
+        stopCoordinatesSource: route.stopCoordinatesSource || null,
+        directionVerificationStatus: route.directionVerificationStatus || 'unverified',
+        directionSource: route.directionSource || null,
+        transitGeometryVerificationStatus: route.transitGeometryVerificationStatus || 'unverified',
+        transitGeometrySource: route.transitGeometrySource || null
+    }])
+);
+
+export const isVerifiedJeepneyRoute = route =>
+    route?.verificationStatus === 'verified' && Boolean(route.verificationSource) &&
+    route.stopCoordinatesVerificationStatus === 'verified' && Boolean(route.stopCoordinatesSource) &&
+    route.directionVerificationStatus === 'verified' && Boolean(route.directionSource) &&
+    route.transitGeometryVerificationStatus === 'verified' && Boolean(route.transitGeometrySource) &&
+    Array.isArray(route.transitGeometry) && route.transitGeometry.length >= 2;
+
 /**
  * Get all routes serving a specific municipality
  */
 export const getRoutesByMunicipality = (municipality) => {
     return Object.values(BATANGAS_JEEPNEY_ROUTES).filter(route =>
-        route.municipality === municipality ||
-        route.municipality === 'Inter-City'
+        isVerifiedJeepneyRoute(route) &&
+        (route.municipality === municipality || route.municipality === 'Inter-City')
     );
 };
 
@@ -428,6 +445,7 @@ export const getRoutesByMunicipality = (municipality) => {
  */
 export const getRoutesByTag = (tag) => {
     return Object.values(BATANGAS_JEEPNEY_ROUTES).filter(route =>
+        isVerifiedJeepneyRoute(route) &&
         route.tags && route.tags.includes(tag)
     );
 };

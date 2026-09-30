@@ -164,6 +164,78 @@ await new Promise(resolve => setTimeout(resolve, 1000))
 
 ## Internal API Functions
 
+## Authenticated BiyaHero API (`/api/v1`)
+
+All account, saved-place, trip, fare-estimation, and assistant endpoints below require
+`Authorization: Bearer <accessToken>`. Register and login remain public. Account IDs
+are taken from the verified JWT; clients must not submit another user's ID.
+
+### Authentication
+
+- `POST /auth/register` — create an account; returns user data and access/refresh tokens.
+- `POST /auth/login` — authenticate an account.
+- `GET /auth/me` — return the current authenticated profile.
+- `PUT /auth/profile` — update supported profile fields.
+
+### Profile, preferences, saved places, and achievements
+
+- `GET /users/me` — authenticated profile, saved places, recent trip history, statistics,
+  and activity-derived achievements.
+- `PUT /users/me/preferences` — update `passengerType` and/or `routePreference`.
+- `GET|POST /saved-places`, `PUT|DELETE /saved-places/:id` — manage account-owned
+  Home, Work, School, Favorite, and custom locations. Coordinates and municipality
+  are validated against the Batangas service area.
+- `GET /users/me/achievements` — achievements derived from stored activity.
+- `GET /places` and `GET /places/:id` — source-verified stops only. The current
+  hand-entered transit dataset has no cited sources, so it currently returns no stops.
+
+### Trips and fare history
+
+- `GET|POST /trips` — list or record an account-owned trip/fare record.
+- `PUT|DELETE /trips/:id` — update or delete only the authenticated user's record.
+- `POST /routes/calculate-segment-fare` — estimate one segment using centralized fare
+  configuration; multi-segment route totals are calculated from each network segment.
+- `POST /routes/multi-modal` — accepts canonical `latitude`/`longitude` place coordinates
+  (legacy `lat`/`lng` is still accepted) and returns itineraries only when route service,
+  stop coordinates, direction, and transit geometry each have verification metadata and
+  source references. Unsupported trips return a no-verified-transit response.
+- `POST /routes/plan` — first-party BiyaHero planning API. Returns a road-route reference,
+  verified public-transit options where available, and explicit motorcycle-taxi integration
+  status. Road geometry is not represented as transit or a motorcycle-specific route;
+  the motorcycle-taxi fields remain unavailable until BiyaHero has its own driver network,
+  routing profile, and fare schedule.
+
+Example authenticated request:
+
+```json
+{
+  "origin": { "name": "Lipa", "latitude": 13.9411, "longitude": 121.165 },
+  "destination": { "name": "SM City Lipa", "latitude": 13.938, "longitude": 121.1625 },
+  "passengerType": "regular",
+  "preference": "recommended"
+}
+```
+
+The response identifies `provider: "BiyaHero"` and returns separate `road`,
+`publicTransit`, and `motorcycleTaxi` fields. Each mode has an explicit status, and
+road/transit failures are reported separately so one provider outage does not fabricate
+an itinerary or hide the other mode's status.
+
+Trip records require Batangas municipalities. Route-use records are checked against
+the existing routing service before storage. Fare records with a user-entered
+`baselineFare` may show savings as `max(0, baselineFare - fare)`; no baseline means
+no savings are reported.
+
+### Grounded assistant
+
+- `POST /assistant/respond` — accepts a message and optional active location, then
+  grounds route, fare, and transfer answers in supported route and hub data.
+- `POST /assistant/suggestions` — returns questions informed by the active location
+  and stops on its verified corridors.
+
+The assistant does not estimate a route when the transportation network has no
+verified match. Hand-entered records without source references are excluded.
+
 ### Geocoding Service
 
 #### `getPlaceSuggestions(query, limit)`
@@ -264,7 +336,8 @@ Calculate fare from route distance.
 
 **Formula:**
 ```
-Base Fare: ₱12 (first 5 km)
+Regular Base Fare: ₱15 (first 5 km)
+Student Minimum Fare: ₱12 (20% discount)
 Additional: ₱1 per km after 5 km
 ```
 

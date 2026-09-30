@@ -17,28 +17,18 @@
  * - What transport types are realistic
  */
 
-import { getRoute } from './routingService.js';
-import { BATANGAS_TRANSPORT_HUBS, ROUTE_TAGS, COMMUTER_BEHAVIOR, ROUTE_LEGITIMACY_RULES } from '../data/batangasTransportNetwork.js';
-import { BATANGAS_JEEPNEY_ROUTES } from '../data/batangasJeepneyRoutes.js';
+import { BATANGAS_TRANSPORT_HUBS, isVerifiedTransportHub, ROUTE_TAGS } from '../data/batangasTransportNetwork.js';
+import { BATANGAS_JEEPNEY_ROUTES, isVerifiedJeepneyRoute } from '../data/batangasJeepneyRoutes.js';
+import { calculateFare } from '../utils/fareCalculator.js';
+import {
+    distanceBetweenCoordinatesInMeters,
+    isWithinBatangasCoordinateBounds,
+    normalizeCoordinates
+} from '../utils/coordinates.js';
 
 /**
  * Calculate fare based on distance and passenger type
  */
-const calculateFare = (distance, passengerType, baseFare = 12) => {
-    let fare = baseFare;
-
-    if (distance > 5) {
-        fare += Math.ceil(distance - 5) * 1; // ₱1 per km after 5km
-    }
-
-    // Apply discounts
-    if (['student', 'senior', 'pwd'].includes(passengerType)) {
-        fare = Math.round(fare * 0.8); // 20% discount
-    }
-
-    return fare;
-};
-
 /**
  * Calculate duration based on distance and transport type
  */
@@ -58,25 +48,88 @@ const calculateDuration = (distance, transportType = 'jeepney') => {
     return Math.round(travelTime + waitTime);
 };
 
-/**
- * Find routes serving a specific location
- */
-const findRoutesServingLocation = (locationName) => {
-    const routes = [];
-    const normalizedLocation = locationName.toLowerCase();
+const MAX_STOP_ACCESS_DISTANCE_KM = 2;
 
-    for (const [routeId, route] of Object.entries(BATANGAS_JEEPNEY_ROUTES)) {
-        const hasStop = route.stops.some(stop =>
-            stop.name.toLowerCase().includes(normalizedLocation) ||
-            normalizedLocation.includes(stop.name.toLowerCase())
-        );
+const serializePlace = place => {
+    const coordinates = normalizeCoordinates(place);
+    return {
+        name: place.name,
+        address: place.address || place.formattedAddress || place.name,
+        ...(coordinates || {}),
+        lat: coordinates?.latitude,
+        lng: coordinates?.longitude
+    };
+};
 
-        if (hasStop) {
-            routes.push(route);
+const distanceInKm = (first, second) => {
+    return distanceBetweenCoordinatesInMeters(first, second) / 1000;
+};
+
+export const findNearestNetworkStop = (
+    place,
+    maximumDistanceKm = MAX_STOP_ACCESS_DISTANCE_KM,
+    routeRecords = Object.values(BATANGAS_JEEPNEY_ROUTES)
+) => {
+    if (!normalizeCoordinates(place)) return null;
+
+    const stops = new Map();
+    for (const route of routeRecords) {
+        if (!isVerifiedJeepneyRoute(route)) continue;
+        for (const stop of route.stops) {
+            const key = `${stop.name}|${stop.lat}|${stop.lng}`;
+            if (!stops.has(key)) stops.set(key, stop);
         }
     }
+    const nearest = [...stops.values()]
+        .map(stop => ({ stop, distanceKm: distanceInKm(place, stop) }))
+        .sort((first, second) => first.distanceKm - second.distanceKm)[0];
+    if (!nearest || nearest.distanceKm > maximumDistanceKm) return null;
+    return { ...nearest.stop, distanceKm: nearest.distanceKm };
+};
 
-    return routes;
+const findRoutesServingLocation = locationName => Object.values(BATANGAS_JEEPNEY_ROUTES)
+    .filter(route => isVerifiedJeepneyRoute(route) &&
+        route.stops.some(stop => stop.name === locationName));
+
+export const getVerifiedTransitLeg = (route, originStop, destinationStop) => {
+    if (!isVerifiedJeepneyRoute(route)) return null;
+    const originIndex = route.stops.findIndex(stop => stop.name === originStop.name);
+    const destinationIndex = route.stops.findIndex(stop => stop.name === destinationStop.name);
+    if (originIndex < 0 || destinationIndex <= originIndex) return null;
+
+    const geometry = route.transitGeometry.map(normalizeCoordinates);
+    if (geometry.length < 2 || geometry.some(point =>
+        !point || !isWithinBatangasCoordinateBounds(point)
+    )) return null;
+
+    const nearestGeometryIndex = stop => geometry
+        .map((point, index) => ({
+            index,
+            distanceMeters: distanceBetweenCoordinatesInMeters(stop, point)
+        }))
+        .sort((first, second) => first.distanceMeters - second.distanceMeters)[0];
+    const originPoint = nearestGeometryIndex(originStop);
+    const destinationPoint = nearestGeometryIndex(destinationStop);
+    const MAX_STOP_TO_SHAPE_DISTANCE_METERS = 30;
+    if (!originPoint || !destinationPoint ||
+        originPoint.distanceMeters > MAX_STOP_TO_SHAPE_DISTANCE_METERS ||
+        destinationPoint.distanceMeters > MAX_STOP_TO_SHAPE_DISTANCE_METERS ||
+        destinationPoint.index <= originPoint.index) return null;
+
+    const legGeometry = geometry.slice(originPoint.index, destinationPoint.index + 1);
+    const distance = legGeometry.slice(1).reduce(
+        (total, point, index) => total + distanceInKm(legGeometry[index], point),
+        0
+    );
+    if (!Number.isFinite(distance) || distance <= 0) return null;
+
+    return {
+        geometry: legGeometry,
+        distance,
+        startSnapMeters: originPoint.distanceMeters,
+        endSnapMeters: destinationPoint.distanceMeters,
+        source: route.transitGeometrySource
+    };
 };
 
 /**
@@ -95,14 +148,8 @@ const findLegitimateTransferHub = (route1Id, route2Id) => {
                 if (stop2.isTransferHub && stop1.name === stop2.name) {
                     // Found a common transfer hub
                     const hubId = stop1.name.toLowerCase().replace(/ /g, '-');
-                    return BATANGAS_TRANSPORT_HUBS[hubId] || {
-                        name: stop1.name,
-                        displayName: stop1.name,
-                        lat: stop1.lat,
-                        lng: stop1.lng,
-                        transferTime: 5,
-                        description: 'Transfer point'
-                    };
+                    const hub = BATANGAS_TRANSPORT_HUBS[hubId];
+                    if (isVerifiedTransportHub(hub)) return hub;
                 }
             }
         }
@@ -116,39 +163,40 @@ const findLegitimateTransferHub = (route1Id, route2Id) => {
  */
 const buildRouteFromJeepneyNetwork = async (origin, destination, passengerType) => {
     try {
-        // Find routes serving origin and destination
+        const originInput = origin;
+        const destinationInput = destination;
+        const nearestOriginStop = findNearestNetworkStop(originInput);
+        const nearestDestinationStop = findNearestNetworkStop(destinationInput);
+        if (!nearestOriginStop || !nearestDestinationStop) return [];
+
+        // Match selected coordinates to the verified network before looking up routes.
+        origin = { ...originInput, name: nearestOriginStop.name };
+        destination = { ...destinationInput, name: nearestDestinationStop.name };
         const originRoutes = findRoutesServingLocation(origin.name);
         const destRoutes = findRoutesServingLocation(destination.name);
+        const routes = [];
 
         if (originRoutes.length === 0 || destRoutes.length === 0) {
-            return null;
+            return routes;
         }
 
         // Check for direct route (same jeepney serves both)
-        const directRoute = originRoutes.find(or =>
+        const directRoutes = originRoutes.filter(or =>
             destRoutes.some(dr => dr.routeId === or.routeId)
         );
 
-        if (directRoute) {
-            // Direct route exists!
-            const originStop = directRoute.stops.find(s =>
-                s.name.toLowerCase().includes(origin.name.toLowerCase()) ||
-                origin.name.toLowerCase().includes(s.name.toLowerCase())
-            );
-            const destStop = directRoute.stops.find(s =>
-                s.name.toLowerCase().includes(destination.name.toLowerCase()) ||
-                destination.name.toLowerCase().includes(s.name.toLowerCase())
-            );
+        for (const directRoute of directRoutes) {
+            const originStop = directRoute.stops.find(stop => stop.name === origin.name);
+            const destStop = directRoute.stops.find(stop => stop.name === destination.name);
 
-            if (!originStop || !destStop) return null;
+            if (!originStop || !destStop || originStop.name === destStop.name) continue;
+            if (distanceInKm(originStop, destStop) < 0.01) continue;
 
-            const routeData = await getRoute(
-                { lat: originStop.lat, lng: originStop.lng },
-                { lat: destStop.lat, lng: destStop.lng }
-            );
+            const routeData = getVerifiedTransitLeg(directRoute, originStop, destStop);
+            if (!routeData) continue;
 
-            const distance = parseFloat(routeData.distance);
-            const fare = calculateFare(distance, passengerType, directRoute.baseFare);
+            const distance = routeData.distance;
+            const fare = calculateFare(distance, passengerType, directRoute.baseFare, directRoute.farePerKm);
             const duration = calculateDuration(distance, directRoute.transportType);
 
             // Get route tags
@@ -157,10 +205,12 @@ const buildRouteFromJeepneyNetwork = async (origin, destination, passengerType) 
                 return ROUTE_TAGS[tagKey] || null;
             }).filter(Boolean) : [];
 
-            return {
+            routes.push({
                 routeId: `direct-${directRoute.routeId}`,
                 routeType: 'direct',
                 routeName: `Direct via ${directRoute.routeName}`,
+                networkId: 'batangas-jeepney-network',
+                transportVerificationStatus: directRoute.verificationStatus,
                 totalSegments: 1,
                 totalDistance: distance,
                 totalDuration: duration,
@@ -170,15 +220,33 @@ const buildRouteFromJeepneyNetwork = async (origin, destination, passengerType) 
                 reliability: directRoute.reliability,
                 tags: routeTags,
                 commuterNotes: directRoute.commuterNotes,
+                originAccess: {
+                    locationName: originInput.name,
+                    lat: Number(originInput.lat),
+                    lng: Number(originInput.lng),
+                    stopName: originStop.name,
+                    stopLat: originStop.lat,
+                    stopLng: originStop.lng,
+                    distanceKm: Number(nearestOriginStop.distanceKm.toFixed(2))
+                },
+                destinationAccess: {
+                    locationName: destinationInput.name,
+                    lat: Number(destinationInput.lat),
+                    lng: Number(destinationInput.lng),
+                    stopName: destStop.name,
+                    stopLat: destStop.lat,
+                    stopLng: destStop.lng,
+                    distanceKm: Number(nearestDestinationStop.distanceKm.toFixed(2))
+                },
                 segments: [{
                     segmentOrder: 1,
                     transportType: directRoute.transportType,
                     routeName: directRoute.routeName,
                     routeCode: directRoute.routeCode,
-                    originName: origin.name,
+                    originName: originStop.name,
                     originLat: originStop.lat,
                     originLng: originStop.lng,
-                    destinationName: destination.name,
+                    destinationName: destStop.name,
                     destinationLat: destStop.lat,
                     destinationLng: destStop.lng,
                     distance,
@@ -187,8 +255,11 @@ const buildRouteFromJeepneyNetwork = async (origin, destination, passengerType) 
                     waitTime: directRoute.frequencyMinutes || 5,
                     transferTime: 0,
                     geometry: routeData.geometry,
-                    instructions: `Sakay ka po ng "${directRoute.routeName}" jeep mula ${origin.name} papuntang ${destination.name}`,
-                    filipinoInstructions: `Sakay ka po ng "${directRoute.routeName}" jeep mula ${origin.name} papuntang ${destination.name}`,
+                    geometryProvider: routeData.source,
+                    startSnapMeters: routeData.startSnapMeters,
+                    endSnapMeters: routeData.endSnapMeters,
+                    instructions: `Sakay ka po ng "${directRoute.routeName}" jeep mula ${originStop.name} papuntang ${destStop.name}`,
+                    filipinoInstructions: `Sakay ka po ng "${directRoute.routeName}" jeep mula ${originStop.name} papuntang ${destStop.name}`,
                     transferNotes: null,
                     commuterNotes: directRoute.commuterNotes
                 }],
@@ -202,15 +273,15 @@ const buildRouteFromJeepneyNetwork = async (origin, destination, passengerType) 
                 recommendationReason: 'Direct jeepney route available - walang hassle!',
                 isRealistic: true,
                 culturallyAccurate: true
-            };
+            });
         }
 
-        // No direct route - find transfer via legitimate hub
+        // Find additional transfer options only through legitimate network hubs.
         for (const originRoute of originRoutes) {
             for (const destRoute of destRoutes) {
                 const transferHub = findLegitimateTransferHub(originRoute.routeId, destRoute.routeId);
 
-                if (transferHub) {
+                if (transferHub && originRoute.routeId !== destRoute.routeId) {
                     // Found a legitimate transfer!
                     const segments = [];
                     let totalDistance = 0;
@@ -219,21 +290,17 @@ const buildRouteFromJeepneyNetwork = async (origin, destination, passengerType) 
 
                     // Segment 1: Origin to Hub
                     const originStop = originRoute.stops.find(s =>
-                        s.name.toLowerCase().includes(origin.name.toLowerCase()) ||
-                        origin.name.toLowerCase().includes(s.name.toLowerCase())
+                        s.name === origin.name
                     );
                     const hubStop1 = originRoute.stops.find(s =>
                         s.name === transferHub.name
                     );
 
-                    if (originStop && hubStop1) {
-                        const route1Data = await getRoute(
-                            { lat: originStop.lat, lng: originStop.lng },
-                            { lat: hubStop1.lat, lng: hubStop1.lng }
-                        );
-
-                        const distance1 = parseFloat(route1Data.distance);
-                        const fare1 = calculateFare(distance1, passengerType, originRoute.baseFare);
+                    if (originStop && hubStop1 && originStop.name !== hubStop1.name) {
+                        const route1Data = getVerifiedTransitLeg(originRoute, originStop, hubStop1);
+                        if (!route1Data) continue;
+                        const distance1 = route1Data.distance;
+                        const fare1 = calculateFare(distance1, passengerType, originRoute.baseFare, originRoute.farePerKm);
                         const duration1 = calculateDuration(distance1, originRoute.transportType);
 
                         totalDistance += distance1;
@@ -257,6 +324,9 @@ const buildRouteFromJeepneyNetwork = async (origin, destination, passengerType) 
                             waitTime: originRoute.frequencyMinutes || 5,
                             transferTime: transferHub.transferTime,
                             geometry: route1Data.geometry,
+                            geometryProvider: route1Data.source,
+                            startSnapMeters: route1Data.startSnapMeters,
+                            endSnapMeters: route1Data.endSnapMeters,
                             instructions: `Sakay ka po ng "${originRoute.routeName}" jeep papuntang ${transferHub.displayName}`,
                             filipinoInstructions: `Sakay ka po ng "${originRoute.routeName}" jeep papuntang ${transferHub.displayName}`,
                             transferNotes: `Baba ka sa ${transferHub.displayName}. ${transferHub.commuterNote || transferHub.description}`,
@@ -269,18 +339,14 @@ const buildRouteFromJeepneyNetwork = async (origin, destination, passengerType) 
                         s.name === transferHub.name
                     );
                     const destStop = destRoute.stops.find(s =>
-                        s.name.toLowerCase().includes(destination.name.toLowerCase()) ||
-                        destination.name.toLowerCase().includes(s.name.toLowerCase())
+                        s.name === destination.name
                     );
 
-                    if (hubStop2 && destStop) {
-                        const route2Data = await getRoute(
-                            { lat: hubStop2.lat, lng: hubStop2.lng },
-                            { lat: destStop.lat, lng: destStop.lng }
-                        );
-
-                        const distance2 = parseFloat(route2Data.distance);
-                        const fare2 = calculateFare(distance2, passengerType, destRoute.baseFare);
+                    if (hubStop2 && destStop && hubStop2.name !== destStop.name) {
+                        const route2Data = getVerifiedTransitLeg(destRoute, hubStop2, destStop);
+                        if (!route2Data) continue;
+                        const distance2 = route2Data.distance;
+                        const fare2 = calculateFare(distance2, passengerType, destRoute.baseFare, destRoute.farePerKm);
                         const duration2 = calculateDuration(distance2, destRoute.transportType);
 
                         totalDistance += distance2;
@@ -304,6 +370,9 @@ const buildRouteFromJeepneyNetwork = async (origin, destination, passengerType) 
                             waitTime: destRoute.frequencyMinutes || 5,
                             transferTime: 0,
                             geometry: route2Data.geometry,
+                            geometryProvider: route2Data.source,
+                            startSnapMeters: route2Data.startSnapMeters,
+                            endSnapMeters: route2Data.endSnapMeters,
                             instructions: `Sakay ka ulit ng "${destRoute.routeName}" jeep papuntang ${destination.name}`,
                             filipinoInstructions: `Sakay ka ulit ng "${destRoute.routeName}" jeep papuntang ${destination.name}`,
                             transferNotes: null,
@@ -320,10 +389,12 @@ const buildRouteFromJeepneyNetwork = async (origin, destination, passengerType) 
                             return ROUTE_TAGS[tagKey] || null;
                         }).filter(Boolean);
 
-                        return {
+                        routes.push({
                             routeId: `transfer-${originRoute.routeId}-${destRoute.routeId}`,
                             routeType: 'split',
                             routeName: `Via ${transferHub.displayName}`,
+                            networkId: 'batangas-jeepney-network',
+                            transportVerificationStatus: 'verified',
                             totalSegments: 2,
                             totalDistance,
                             totalDuration,
@@ -332,9 +403,27 @@ const buildRouteFromJeepneyNetwork = async (origin, destination, passengerType) 
                             comfortLevel: 'basic',
                             reliability: Math.min(originRoute.reliability, destRoute.reliability),
                             tags: routeTags,
+                            originAccess: {
+                                locationName: originInput.name,
+                                lat: Number(originInput.lat),
+                                lng: Number(originInput.lng),
+                                stopName: originStop.name,
+                                stopLat: originStop.lat,
+                                stopLng: originStop.lng,
+                                distanceKm: Number(nearestOriginStop.distanceKm.toFixed(2))
+                            },
+                            destinationAccess: {
+                                locationName: destinationInput.name,
+                                lat: Number(destinationInput.lat),
+                                lng: Number(destinationInput.lng),
+                                stopName: destStop.name,
+                                stopLat: destStop.lat,
+                                stopLng: destStop.lng,
+                                distanceKm: Number(nearestDestinationStop.distanceKm.toFixed(2))
+                            },
                             segments,
                             advantages: [
-                                'Uses actual jeepney routes',
+                                'Uses a source-verified transit corridor',
                                 'Legitimate transfer hub',
                                 'Commonly used by locals'
                             ],
@@ -344,16 +433,16 @@ const buildRouteFromJeepneyNetwork = async (origin, destination, passengerType) 
                             recommendationReason: `Mag-transfer ka sa ${transferHub.displayName}, major hub yan ng commuters`,
                             isRealistic: true,
                             culturallyAccurate: true
-                        };
+                        });
                     }
                 }
             }
         }
 
-        return null;
+        return routes;
     } catch (error) {
         console.error('Error building route from jeepney network:', error);
-        return null;
+        throw error;
     }
 };
 
@@ -367,21 +456,18 @@ export const generateRealisticRoutes = async (origin, destination, passengerType
 
         // Build from jeepney network knowledge
         console.log('🔍 Building route from Batangas jeepney network...');
-        const networkRoute = await buildRouteFromJeepneyNetwork(origin, destination, passengerType);
-        if (networkRoute) {
-            networkRoute.recommended = true;
-            routes.push(networkRoute);
-        }
+        const networkRoutes = await buildRouteFromJeepneyNetwork(origin, destination, passengerType);
+        routes.push(...networkRoutes);
 
         // If still no routes, return error
         if (routes.length === 0) {
             return {
                 success: false,
-                error: 'No realistic commuter route found',
-                message: `Wala pa kaming route information para sa ${origin.name} to ${destination.name}. Baka hindi pa ito common na route o kailangan pa namin i-add sa database.`,
-                suggestion: 'Try searching for routes to major hubs like Lipa Cathedral, SM Lipa, Batangas Grand Terminal, o Tanauan City Hall.',
-                origin: { name: origin.name, lat: origin.lat, lng: origin.lng },
-                destination: { name: destination.name, lat: destination.lat, lng: destination.lng }
+                error: 'No verified BiyaHero route is currently available for this trip.',
+                message: 'No source-verified transit stops or public transportation corridors are currently available. Candidate route records are excluded until their stop coordinates and service are verified.',
+                suggestion: 'Use the selected place coordinates for a road-navigation app, or check again when verified Batangas transit data is available.',
+                origin: serializePlace(origin),
+                destination: serializePlace(destination)
             };
         }
 
@@ -390,16 +476,23 @@ export const generateRealisticRoutes = async (origin, destination, passengerType
             if (options.preference === 'cheapest') return a.totalFare - b.totalFare;
             if (options.preference === 'fastest') return a.totalDuration - b.totalDuration;
             if (options.preference === 'least_transfers') return a.totalTransfers - b.totalTransfers;
-            return 0;
+            return b.reliability - a.reliability || a.totalFare - b.totalFare;
+        });
+        sortedRoutes.forEach((route, index) => {
+            route.recommended = index === 0;
         });
 
         return {
             success: true,
-            origin: { name: origin.name, lat: origin.lat, lng: origin.lng },
-            destination: { name: destination.name, lat: destination.lat, lng: destination.lng },
+            origin: serializePlace(origin),
+            destination: serializePlace(destination),
             passengerType,
             totalRoutes: sortedRoutes.length,
             routes: sortedRoutes,
+            matchedLocations: {
+                origin: sortedRoutes[0].originAccess,
+                destination: sortedRoutes[0].destinationAccess
+            },
             routingMethod: 'batangas_commuter_network',
             culturallyAccurate: true,
             coverageArea: 'Batangas Province'

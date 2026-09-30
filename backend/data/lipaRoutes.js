@@ -7,6 +7,7 @@
  * - Transfer points are major hubs where multiple routes intersect
  * - Routes are bidirectional (can go both ways)
  */
+import { KNOWN_PLACE_LOCATIONS } from '../../shared/knownPlaceLocations.js';
 
 export const LIPA_JEEPNEY_ROUTES = [
     {
@@ -32,7 +33,7 @@ export const LIPA_JEEPNEY_ROUTES = [
             { name: 'Lipa Cathedral', lat: 13.9405, lng: 121.1655, isHub: true },
             { name: 'Lipa Sabang', lat: 13.9420, lng: 121.1670, isHub: true },
             { name: 'Robinsons Place Lipa', lat: 13.9370, lng: 121.1640, isHub: true },
-            { name: 'SM City Lipa', lat: 13.9380, lng: 121.1625, isHub: true }
+            { name: 'SM City Lipa', lat: KNOWN_PLACE_LOCATIONS.smCityLipa.latitude, lng: KNOWN_PLACE_LOCATIONS.smCityLipa.longitude, isHub: true }
         ],
         frequency: 'very_high', // Every 3-5 minutes
         operatingHours: '5:00 AM - 10:00 PM',
@@ -70,7 +71,7 @@ export const LIPA_JEEPNEY_ROUTES = [
         routeName: 'SM Lipa - Robinsons',
         transportType: 'jeepney',
         stops: [
-            { name: 'SM City Lipa', lat: 13.9380, lng: 121.1625, isHub: true },
+            { name: 'SM City Lipa', lat: KNOWN_PLACE_LOCATIONS.smCityLipa.latitude, lng: KNOWN_PLACE_LOCATIONS.smCityLipa.longitude, isHub: true },
             { name: 'Robinsons Place Lipa', lat: 13.9370, lng: 121.1640, isHub: true },
             { name: 'Lipa Sabang', lat: 13.9420, lng: 121.1670, isHub: true },
             { name: 'Lipa Cathedral', lat: 13.9405, lng: 121.1655, isHub: true }
@@ -112,8 +113,8 @@ export const LIPA_TRANSFER_HUBS = [
         id: 'hub-sm-lipa',
         name: 'SM City Lipa',
         displayName: 'SM City Lipa',
-        lat: 13.9380,
-        lng: 121.1625,
+        lat: KNOWN_PLACE_LOCATIONS.smCityLipa.latitude,
+        lng: KNOWN_PLACE_LOCATIONS.smCityLipa.longitude,
         importance: 9,
         description: 'Major shopping mall and transport hub.',
         availableRoutes: ['lipa-02', 'lipa-05'],

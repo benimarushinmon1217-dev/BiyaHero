@@ -1,5 +1,10 @@
 # 🚌 Routing Improvements - Realistic Lipa City Routes
 
+> **Historical implementation notes:** The route claims below were not backed by
+> cited transit data or verified route geometry. They are superseded by the
+> [current routing accuracy audit](../ROUTING_ACCURACY.md); these candidate records are
+> now marked unverified and are not used to generate public-transit itineraries.
+
 ## 🎯 What Was Improved
 
 The routing system now uses **actual Lipa City jeepney routes** instead of generic distance-based routing.

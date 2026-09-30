@@ -4,6 +4,7 @@
  */
 
 import apiClient from '../api/axios';
+import { normalizeCoordinates } from '../utils/coordinates';
 
 /**
  * Get multiple route options from backend
@@ -15,16 +16,25 @@ import apiClient from '../api/axios';
  */
 export const getMultiModalRoutes = async (origin, destination, passengerType = 'regular', preference = 'recommended') => {
     try {
+        const originCoordinates = normalizeCoordinates(origin)
+        const destinationCoordinates = normalizeCoordinates(destination)
+        if (!originCoordinates || !destinationCoordinates) {
+            throw new Error('Selected locations need valid latitude and longitude coordinates.')
+        }
         const response = await apiClient.post('/routes/multi-modal', {
             origin: {
                 name: origin.name,
-                lat: parseFloat(origin.lat),
-                lng: parseFloat(origin.lng)
+                ...originCoordinates,
+                address: origin.formattedAddress || origin.displayName || origin.address || '',
+                municipality: origin.municipality,
+                province: origin.province
             },
             destination: {
                 name: destination.name,
-                lat: parseFloat(destination.lat),
-                lng: parseFloat(destination.lng)
+                ...destinationCoordinates,
+                address: destination.formattedAddress || destination.displayName || destination.address || '',
+                municipality: destination.municipality,
+                province: destination.province
             },
             passengerType: passengerType.toLowerCase(),
             preference
@@ -42,6 +52,41 @@ export const getMultiModalRoutes = async (origin, destination, passengerType = '
         };
     }
 };
+
+export const getRoutePlan = async (origin, destination, passengerType = 'regular', preference = 'recommended') => {
+    try {
+        const originCoordinates = normalizeCoordinates(origin)
+        const destinationCoordinates = normalizeCoordinates(destination)
+        if (!originCoordinates || !destinationCoordinates) {
+            throw new Error('Selected locations need valid latitude and longitude coordinates.')
+        }
+        const response = await apiClient.post('/routes/plan', {
+            origin: {
+                name: origin.name,
+                ...originCoordinates,
+                address: origin.formattedAddress || origin.displayName || origin.address || '',
+                municipality: origin.municipality,
+                province: origin.province
+            },
+            destination: {
+                name: destination.name,
+                ...destinationCoordinates,
+                address: destination.formattedAddress || destination.displayName || destination.address || '',
+                municipality: destination.municipality,
+                province: destination.province
+            },
+            passengerType: passengerType.toLowerCase(),
+            preference
+        })
+        return { success: true, data: response.data.data }
+    } catch (error) {
+        console.error('BiyaHero route planning API error:', error)
+        return {
+            success: false,
+            error: error.friendlyMessage || error.response?.data?.message || error.message
+        }
+    }
+}
 
 /**
  * Get all transport hubs
@@ -113,6 +158,7 @@ export const calculateSegmentFare = async (transportType, distance, passengerTyp
 
 export default {
     getMultiModalRoutes,
+    getRoutePlan,
     getTransportHubs,
     getTransportTypes,
     calculateSegmentFare

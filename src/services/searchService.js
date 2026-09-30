@@ -1,7 +1,7 @@
 // Intelligent Search Service for BiyaHero
 // Provides fuzzy matching, typo tolerance, and smart location search
 
-import { BATANGAS_LOCATIONS, getCategoryIcon, getCategoryLabel } from '../data/batangasLocations'
+import { BATANGAS_LOCATIONS, getCategoryIcon, getCategoryLabel } from '../data/batangasLocations.js'
 
 /**
  * Calculate Levenshtein distance for fuzzy matching
