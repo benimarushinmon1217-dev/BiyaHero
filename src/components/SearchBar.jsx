@@ -2,21 +2,26 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { MapPin, Navigation, Search, Locate, X, CheckCircle, MapPinned, Info } from 'lucide-react'
-import { getAutocompleteSuggestions } from '../services/searchService'
-import { getPlaceSuggestions, getPlaceIcon, formatPlaceDisplay } from '../services/geocodingService'
+import { getPlaceSuggestions, getPlaceIcon, formatPlaceDisplay, resolvePlaceSuggestion } from '../services/geocodingService'
+import { isBatangasMunicipality, isWithinBatangasScope } from '../utils/batangasScope'
+import { createSavedPlace, getSavedPlaces, getVerifiedPlaces } from '../services/accountService'
+import { useAuth } from '../context/AuthContext'
+import BiyaHeroSelect from './BiyaHeroSelect'
+import { reconcileKnownPlaceLocation } from '../../shared/knownPlaceLocations'
 
 // Quick location presets for easy access
 const QUICK_LOCATIONS = [
-    { name: 'SM City Lipa', lat: 13.9380, lng: 121.1625, icon: '🏬' },
-    { name: 'Lipa Cathedral', lat: 13.9411, lng: 121.1650, icon: '⛪' },
-    { name: 'BSU Lipa', lat: 13.9450, lng: 121.1680, icon: '🎓' },
-    { name: 'Batangas Grand Terminal', lat: 13.7565, lng: 121.0583, icon: '🚌' },
-    { name: 'Tanauan City Hall', lat: 14.0858, lng: 121.1500, icon: '🏛️' },
-    { name: 'Rosario Town Center', lat: 13.8458, lng: 121.2042, icon: '🏘️' }
+    { name: 'SM City Lipa', icon: '🏬' },
+    { name: 'Lipa Cathedral', icon: '⛪' },
+    { name: 'Batangas State University', icon: '🎓' },
+    { name: 'Batangas Grand Terminal', icon: '🚌' },
+    { name: 'Tanauan City Hall', icon: '🏛️' },
+    { name: 'Rosario Town Center', icon: '🏘️' }
 ]
 
 const SearchBar = () => {
     const navigate = useNavigate()
+    const { setActiveLocation } = useAuth()
     const [origin, setOrigin] = useState('')
     const [destination, setDestination] = useState('')
     const [loadingLocation, setLoadingLocation] = useState(false)
@@ -27,6 +32,10 @@ const SearchBar = () => {
     const [locationConfidence, setLocationConfidence] = useState(null) // 'high', 'medium', 'low'
     const [showDebugPanel, setShowDebugPanel] = useState(false)
     const [debugInfo, setDebugInfo] = useState(null)
+    const [savedPlaces, setSavedPlaces] = useState([])
+    const [verifiedPlaces, setVerifiedPlaces] = useState([])
+    const [savedPlaceLabel, setSavedPlaceLabel] = useState('favorite')
+    const [savedPlaceMessage, setSavedPlaceMessage] = useState('')
 
     // Selected place objects (validated coordinates)
     const [selectedOriginPlace, setSelectedOriginPlace] = useState(null)
@@ -52,6 +61,8 @@ const SearchBar = () => {
     // Refs for click outside detection
     const originRef = useRef(null)
     const destinationRef = useRef(null)
+    const originSelectionRequest = useRef(0)
+    const destinationSelectionRequest = useRef(0)
 
     // Handle click outside to close suggestions
     useEffect(() => {
@@ -70,30 +81,155 @@ const SearchBar = () => {
         return () => document.removeEventListener('mousedown', handleClickOutside)
     }, [])
 
+    useEffect(() => {
+        getSavedPlaces()
+            .then(setSavedPlaces)
+            .catch((error) => {
+                console.error('Saved places could not be loaded:', error)
+                setLocationError(error.friendlyMessage || 'Saved places are temporarily unavailable.')
+            })
+    }, [])
+
+    useEffect(() => {
+        getVerifiedPlaces()
+            .then(setVerifiedPlaces)
+            .catch((error) => {
+                console.error('Verified places could not be loaded:', error)
+            })
+    }, [])
+
     // Origin autocomplete (local database)
     useEffect(() => {
-        if (origin.trim().length >= 2 && !selectedOriginPlace) {
-            const suggestions = getAutocompleteSuggestions(origin, 8)
-            setOriginSuggestions(suggestions)
-            setShowOriginSuggestions(suggestions.length > 0)
-        } else {
-            setOriginSuggestions([])
-            setShowOriginSuggestions(false)
-        }
-        setSelectedOriginIndex(-1)
-    }, [origin, selectedOriginPlace])
+        const timer = window.setTimeout(() => {
+            if (origin.trim().length >= 2 && !selectedOriginPlace) {
+                const verified = verifiedPlaces
+                    .filter(place => place.name.toLowerCase().includes(origin.trim().toLowerCase()))
+                    .map(place => ({
+                        ...place,
+                        icon: getPlaceIcon(place.category),
+                        categoryLabel: place.category,
+                        isVerifiedPlace: true
+                    }))
+                const saved = savedPlaces
+                    .filter(place => `${place.name} ${place.formattedAddress || ''}`.toLowerCase().includes(origin.trim().toLowerCase()))
+                    .map(place => ({
+                        ...place,
+                        lat: Number(place.lat),
+                        lng: Number(place.lng),
+                        icon: '📌',
+                        categoryLabel: `Saved ${place.label}`,
+                        isSavedPlace: true
+                    }))
+                const combined = [...saved, ...verified]
+                    .filter((place, index, list) => list.findIndex(candidate => candidate.name.toLowerCase() === place.name.toLowerCase()) === index)
+                    .slice(0, 8)
+                setOriginSuggestions(combined)
+                setShowOriginSuggestions(combined.length > 0)
+            } else {
+                setOriginSuggestions([])
+                setShowOriginSuggestions(false)
+            }
+            setSelectedOriginIndex(-1)
+        }, 150)
+        return () => window.clearTimeout(timer)
+    }, [origin, selectedOriginPlace, savedPlaces, verifiedPlaces])
 
     // Destination autocomplete (local database)
     useEffect(() => {
-        if (destination.trim().length >= 2 && !selectedDestinationPlace) {
-            const suggestions = getAutocompleteSuggestions(destination, 8)
-            setDestinationSuggestions(suggestions)
-            setShowDestinationSuggestions(suggestions.length > 0)
-        } else {
-            setDestinationSuggestions([])
-            setShowDestinationSuggestions(false)
+        const timer = window.setTimeout(() => {
+            if (destination.trim().length >= 2 && !selectedDestinationPlace) {
+                const verified = verifiedPlaces
+                    .filter(place => place.name.toLowerCase().includes(destination.trim().toLowerCase()))
+                    .map(place => ({
+                        ...place,
+                        icon: getPlaceIcon(place.category),
+                        categoryLabel: place.category,
+                        isVerifiedPlace: true
+                    }))
+                const saved = savedPlaces
+                    .filter(place => `${place.name} ${place.formattedAddress || ''}`.toLowerCase().includes(destination.trim().toLowerCase()))
+                    .map(place => ({
+                        ...place,
+                        lat: Number(place.lat),
+                        lng: Number(place.lng),
+                        icon: '📌',
+                        categoryLabel: `Saved ${place.label}`,
+                        isSavedPlace: true
+                    }))
+                const combined = [...saved, ...verified]
+                    .filter((place, index, list) => list.findIndex(candidate => candidate.name.toLowerCase() === place.name.toLowerCase()) === index)
+                    .slice(0, 8)
+                setDestinationSuggestions(combined)
+                setShowDestinationSuggestions(combined.length > 0)
+            } else {
+                setDestinationSuggestions([])
+                setShowDestinationSuggestions(false)
+            }
+            setSelectedDestinationIndex(-1)
+        }, 150)
+        return () => window.clearTimeout(timer)
+    }, [destination, selectedDestinationPlace, savedPlaces, verifiedPlaces])
+
+    useEffect(() => {
+        if (origin.trim().length < 3 || selectedOriginPlace) {
+            setOriginPlaceSuggestions([])
+            setShowOriginPlaces(false)
+            setLoadingOriginPlaces(false)
+            return undefined
         }
-        setSelectedDestinationIndex(-1)
+        let cancelled = false
+        const timer = window.setTimeout(async () => {
+            setLoadingOriginPlaces(true)
+            try {
+                const places = await getPlaceSuggestions(origin.trim(), 5)
+                if (!cancelled) {
+                    setOriginPlaceSuggestions(places)
+                    setShowOriginPlaces(places.length > 0)
+                }
+            } catch (error) {
+                if (!cancelled) {
+                    console.error('Origin OpenStreetMap search error:', error)
+                    setLocationError(error.message || 'OpenStreetMap location search is temporarily unavailable.')
+                }
+            } finally {
+                if (!cancelled) setLoadingOriginPlaces(false)
+            }
+        }, 350)
+        return () => {
+            cancelled = true
+            window.clearTimeout(timer)
+        }
+    }, [origin, selectedOriginPlace])
+
+    useEffect(() => {
+        if (destination.trim().length < 3 || selectedDestinationPlace) {
+            setDestinationPlaceSuggestions([])
+            setShowDestinationPlaces(false)
+            setLoadingDestinationPlaces(false)
+            return undefined
+        }
+        let cancelled = false
+        const timer = window.setTimeout(async () => {
+            setLoadingDestinationPlaces(true)
+            try {
+                const places = await getPlaceSuggestions(destination.trim(), 5)
+                if (!cancelled) {
+                    setDestinationPlaceSuggestions(places)
+                    setShowDestinationPlaces(places.length > 0)
+                }
+            } catch (error) {
+                if (!cancelled) {
+                    console.error('Destination OpenStreetMap search error:', error)
+                    setLocationError(error.message || 'OpenStreetMap location search is temporarily unavailable.')
+                }
+            } finally {
+                if (!cancelled) setLoadingDestinationPlaces(false)
+            }
+        }, 350)
+        return () => {
+            cancelled = true
+            window.clearTimeout(timer)
+        }
     }, [destination, selectedDestinationPlace])
 
     const handleSearch = (e) => {
@@ -115,8 +251,8 @@ const SearchBar = () => {
         // Navigate with validated place objects
         navigate('/route', {
             state: {
-                origin: selectedOriginPlace ? selectedOriginPlace.name : origin,
-                destination: selectedDestinationPlace.name,
+                origin: selectedOriginPlace?.name || origin.trim(),
+                destination: selectedDestinationPlace.name || destination.trim(),
                 originPlace: selectedOriginPlace,
                 destinationPlace: selectedDestinationPlace,
                 userCoords
@@ -125,18 +261,21 @@ const SearchBar = () => {
     }
 
     // Geocode origin to get place suggestions
-    const handleOriginGeocode = async () => {
-        if (!origin.trim() || selectedOriginPlace) return
+    const handleOriginGeocode = async (query = origin, force = false) => {
+        if (!query.trim() || (!force && selectedOriginPlace)) return
 
         setLoadingOriginPlaces(true)
+        setLocationError('')
         setShowOriginSuggestions(false)
 
         try {
-            const places = await getPlaceSuggestions(origin, 5)
+            const places = await getPlaceSuggestions(query.trim(), 5)
             setOriginPlaceSuggestions(places)
             setShowOriginPlaces(places.length > 0)
+            if (places.length === 0) setLocationError('No Batangas locations matched. Try a barangay, municipality, or landmark name.')
         } catch (error) {
             console.error('Origin geocoding error:', error)
+            setLocationError(error.friendlyMessage || 'Location search is temporarily unavailable. Your typed location is still here.')
         } finally {
             setLoadingOriginPlaces(false)
         }
@@ -147,20 +286,37 @@ const SearchBar = () => {
         if (!destination.trim() || selectedDestinationPlace) return
 
         setLoadingDestinationPlaces(true)
+        setLocationError('')
         setShowDestinationSuggestions(false)
 
         try {
             const places = await getPlaceSuggestions(destination, 5)
             setDestinationPlaceSuggestions(places)
             setShowDestinationPlaces(places.length > 0)
+            if (places.length === 0) setLocationError('No Batangas locations matched. Try a barangay, municipality, or landmark name.')
         } catch (error) {
             console.error('Destination geocoding error:', error)
+            setLocationError(error.friendlyMessage || 'Location search is temporarily unavailable. Your typed destination is still here.')
         } finally {
             setLoadingDestinationPlaces(false)
         }
     }
 
     const handleOriginSelect = (location) => {
+        if (location.isSavedPlace || location.isVerifiedPlace) {
+            const { place, corrected } = reconcileKnownPlaceLocation(location)
+            setSelectedOriginPlace({
+                ...place,
+                displayName: place.formattedAddress || place.name,
+                confidence: 1
+            })
+            setOrigin(place.name)
+            setShowOriginSuggestions(false)
+            setUserCoords(null)
+            setActiveLocation(place)
+            if (corrected) setLocationWarning('The stored SM City Lipa pin was over 500 m from the mapped mall. BiyaHero corrected it to the OpenStreetMap mall location.')
+            return
+        }
         setOrigin(location.name)
         setShowOriginSuggestions(false)
         setUserCoords(null) // Clear user coords when selecting from suggestions
@@ -169,23 +325,105 @@ const SearchBar = () => {
     }
 
     const handleDestinationSelect = (location) => {
+        if (location.isSavedPlace || location.isVerifiedPlace) {
+            const { place, corrected } = reconcileKnownPlaceLocation(location)
+            setSelectedDestinationPlace({
+                ...place,
+                displayName: place.formattedAddress || place.name,
+                confidence: 1
+            })
+            setDestination(place.name)
+            setShowDestinationSuggestions(false)
+            if (corrected) setLocationWarning('The stored SM City Lipa pin was over 500 m from the mapped mall. BiyaHero corrected it to the OpenStreetMap mall location.')
+            return
+        }
         setDestination(location.name)
         setShowDestinationSuggestions(false)
         // Trigger geocoding to get exact coordinates
         setTimeout(() => handleDestinationGeocode(), 100)
     }
 
-    const handleOriginPlaceSelect = (place) => {
-        setSelectedOriginPlace(place)
-        setOrigin(place.name)
-        setShowOriginPlaces(false)
-        setUserCoords(null)
+    const handleOriginPlaceSelect = async (suggestion) => {
+        const requestId = ++originSelectionRequest.current
+        setLoadingOriginPlaces(true)
+        setLocationError('')
+        try {
+            const resolvedPlace = await resolvePlaceSuggestion(suggestion)
+            if (requestId !== originSelectionRequest.current) return
+            const { place, corrected } = reconcileKnownPlaceLocation({
+                ...resolvedPlace,
+                searchQuery: origin.trim()
+            })
+            setSelectedOriginPlace({ ...place, searchQuery: origin.trim() })
+            setOrigin(place.name || place.displayName || place.display_name || '')
+            setShowOriginPlaces(false)
+            setOriginPlaceSuggestions([])
+            setShowOriginSuggestions(false)
+            setOriginSuggestions([])
+            setUserCoords(null)
+            setActiveLocation(place)
+            if (corrected) setLocationWarning('The selected SM City Lipa result was far from the mapped mall. The route pin was corrected to the OpenStreetMap mall location.')
+        } catch (error) {
+            if (requestId === originSelectionRequest.current) {
+                setLocationError(error.message || 'Unable to confirm this location.')
+            }
+        } finally {
+            if (requestId === originSelectionRequest.current) setLoadingOriginPlaces(false)
+        }
     }
 
-    const handleDestinationPlaceSelect = (place) => {
-        setSelectedDestinationPlace(place)
-        setDestination(place.name)
-        setShowDestinationPlaces(false)
+    const handleDestinationPlaceSelect = async (suggestion) => {
+        const requestId = ++destinationSelectionRequest.current
+        setLoadingDestinationPlaces(true)
+        setLocationError('')
+        try {
+            const resolvedPlace = await resolvePlaceSuggestion(suggestion)
+            if (requestId !== destinationSelectionRequest.current) return
+            const { place, corrected } = reconcileKnownPlaceLocation({
+                ...resolvedPlace,
+                searchQuery: destination.trim()
+            })
+            setSelectedDestinationPlace({ ...place, searchQuery: destination.trim() })
+            setDestination(place.name || place.displayName || place.display_name || '')
+            setShowDestinationPlaces(false)
+            setDestinationPlaceSuggestions([])
+            setShowDestinationSuggestions(false)
+            setDestinationSuggestions([])
+            if (corrected) setLocationWarning('The selected SM City Lipa result was far from the mapped mall. The route pin was corrected to the OpenStreetMap mall location.')
+        } catch (error) {
+            if (requestId === destinationSelectionRequest.current) {
+                setLocationError(error.message || 'Unable to confirm this location.')
+            }
+        } finally {
+            if (requestId === destinationSelectionRequest.current) setLoadingDestinationPlaces(false)
+        }
+    }
+
+    const savePlace = async (place) => {
+        if (!place) return
+        if (!isWithinBatangasScope(place)) {
+            setSavedPlaceMessage('Only verified locations within Batangas can be saved.')
+            return
+        }
+        try {
+            const saved = await createSavedPlace({
+                name: place.name,
+                label: savedPlaceLabel,
+                lat: Number(place.lat),
+                lng: Number(place.lng),
+                formattedAddress: place.formattedAddress || place.displayName || place.name,
+                barangay: place.barangay || '',
+                municipality: place.municipality,
+                province: place.province || 'Batangas'
+            })
+            setSavedPlaces(previous => [
+                ...previous.filter(item => item.id !== saved.id),
+                saved
+            ])
+            setSavedPlaceMessage(`${place.name} saved as ${savedPlaceLabel}.`)
+        } catch (error) {
+            setSavedPlaceMessage(error.friendlyMessage || 'Unable to save this place right now.')
+        }
     }
 
     const clearOriginSelection = () => {
@@ -200,21 +438,13 @@ const SearchBar = () => {
     }
 
     const handleQuickLocationSelect = (location) => {
-        setSelectedOriginPlace({
-            name: location.name,
-            lat: location.lat,
-            lng: location.lng,
-            displayName: location.name,
-            category: 'preset_location',
-            confidence: 1.0,
-            isKnownLocation: true
-        })
         setOrigin(location.name)
-        setUserCoords({ lat: location.lat, lng: location.lng })
+        setSelectedOriginPlace(null)
+        setUserCoords(null)
         setLocationError('')
         setLocationWarning('')
         setShowQuickLocations(false)
-        setLocationConfidence('high')
+        handleOriginGeocode(location.name, true)
     }
 
     const handleOriginKeyDown = (e) => {
@@ -292,85 +522,38 @@ const SearchBar = () => {
                 else if (accuracy <= 200) confidence = 'medium'
 
                 // Reverse geocode to get address FIRST
+                const reverseController = new AbortController()
+                const reverseTimeout = window.setTimeout(() => reverseController.abort(), 8000)
                 try {
                     const response = await fetch(
-                        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&accept-language=en`
+                        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1&accept-language=en`,
+                        { signal: reverseController.signal }
                     )
+                    window.clearTimeout(reverseTimeout)
+                    if (!response.ok) throw new Error(`Reverse geocoder returned HTTP ${response.status}`)
                     const data = await response.json()
 
                     console.log('🗺️ Reverse Geocoding Response:', data)
 
-                    // EXPANDED Batangas bounds with tolerance
-                    const BATANGAS_BOUNDS = {
-                        minLat: 13.50,   // Expanded south (includes all southern Batangas)
-                        maxLat: 14.20,   // Expanded north (includes all northern areas)
-                        minLng: 120.70,  // Expanded west
-                        maxLng: 121.40   // Expanded east (includes all Lipa and eastern areas)
-                    }
-
-                    // Known Batangas municipalities (whitelist)
-                    const BATANGAS_MUNICIPALITIES = [
-                        'lipa', 'lipa city', 'batangas city', 'batangas', 'tanauan', 'tanauan city',
-                        'rosario', 'ibaan', 'padre garcia', 'san jose', 'bauan', 'cuenca',
-                        'malvar', 'sto tomas', 'santo tomas', 'mataasnakahoy', 'mataas na kahoy',
-                        'balete', 'talisay', 'nasugbu', 'calaca', 'lemery', 'san juan',
-                        'taal', 'laurel', 'agoncillo', 'alitagtag', 'balayan', 'calatagan',
-                        'san luis', 'san nicolas', 'san pascual', 'santa teresita', 'tuy',
-                        'lobo', 'mabini', 'san antonio', 'tingloy', 'taysan'
-                    ]
-
-                    // MULTI-LAYER VALIDATION
                     const address = data.address || {}
-
-                    // Extract location info from all possible fields
-                    const province = (address.state || address.province || '').toLowerCase()
+                    const province = (address.province || address.state || '').toLowerCase()
                     const city = (address.city || '').toLowerCase()
                     const town = (address.town || '').toLowerCase()
                     const municipality = (address.municipality || '').toLowerCase()
                     const county = (address.county || '').toLowerCase()
                     const displayName = (data.display_name || '').toLowerCase()
-
-                    console.log('📋 Parsed Location Data:', {
-                        province,
-                        city,
-                        town,
-                        municipality,
-                        county,
-                        displayName
-                    })
-
-                    // VALIDATION LAYER 1: Check province name (highest priority)
-                    const provinceMatch = (
-                        province.includes('batangas') ||
+                    const detectedMunicipality = address.city || address.town || address.municipality || address.county || ''
+                    const provinceMatch = province.includes('batangas') ||
                         displayName.includes('batangas province') ||
                         displayName.includes('province of batangas')
-                    )
-
-                    // VALIDATION LAYER 2: Check municipality/city name
-                    const municipalityMatch = BATANGAS_MUNICIPALITIES.some(muni =>
-                        city.includes(muni) ||
-                        town.includes(muni) ||
-                        municipality.includes(muni) ||
-                        county.includes(muni) ||
-                        displayName.includes(muni)
-                    )
-
-                    // VALIDATION LAYER 3: Check coordinate bounds (with tolerance)
-                    const coordinateMatch = (
-                        latitude >= BATANGAS_BOUNDS.minLat &&
-                        latitude <= BATANGAS_BOUNDS.maxLat &&
-                        longitude >= BATANGAS_BOUNDS.minLng &&
-                        longitude <= BATANGAS_BOUNDS.maxLng
-                    )
-
-                    console.log('✅ Validation Results:', {
-                        provinceMatch,
-                        municipalityMatch,
-                        coordinateMatch
+                    const municipalityMatch = isBatangasMunicipality(detectedMunicipality)
+                    const isInBatangas = isWithinBatangasScope({
+                        lat: latitude,
+                        lng: longitude,
+                        municipality: detectedMunicipality,
+                        province: provinceMatch ? province : ''
                     })
-
-                    // Accept if ANY validation layer passes
-                    const isInBatangas = provinceMatch || municipalityMatch || coordinateMatch
+                    const coordinateMatch = isInBatangas
 
                     // Update confidence based on validation layers
                     if (provinceMatch && municipalityMatch && coordinateMatch) {
@@ -428,24 +611,47 @@ const SearchBar = () => {
                     }
 
                     // Create a readable address
-                    const locationName = address.city || address.town || address.village ||
-                        address.municipality || address.county ||
-                        `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`
+                    const barangay = address.suburb || address.village || address.neighbourhood || address.hamlet || ''
+                    const street = [address.house_number, address.road].filter(Boolean).join(' ')
+                    const municipalityName = address.city || address.town || address.municipality || address.county || ''
+                    const provinceName = address.province || address.state || 'Batangas'
+                    const locationName = barangay || municipalityName || address.road || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`
+                    const formattedAddress = data.display_name ||
+                        [street, barangay, municipalityName, provinceName, address.country].filter(Boolean).join(', ')
+                    const osmType = String(data.osm_type || '').toLowerCase()
+                    const osmId = data.osm_id
+                    const osmUrl = osmId && ['node', 'way', 'relation'].includes(osmType)
+                        ? `https://www.openstreetmap.org/${osmType}/${osmId}`
+                        : null
 
                     // Create a place object for current location
-                    setSelectedOriginPlace({
+                    const currentPlace = {
                         name: locationName,
                         lat: latitude,
                         lng: longitude,
                         displayName: `${locationName} (Your Location)`,
+                        formattedAddress,
+                        street,
+                        barangay,
+                        municipality: municipalityName,
+                        province: provinceName,
+                        accuracy,
                         category: 'current_location',
                         confidence: confidence === 'high' ? 1.0 : confidence === 'medium' ? 0.7 : 0.4,
-                        isKnownLocation: false
-                    })
-
-                    setOrigin(locationName)
+                        isKnownLocation: false,
+                        provider: 'GPS',
+                        geocodingProvider: 'OpenStreetMap',
+                        osmType,
+                        osmId,
+                        osmUrl,
+                        locationPrecision: 'device GPS fix'
+                    }
+                    setSelectedOriginPlace(currentPlace)
+                    setActiveLocation(currentPlace)
+                    setOrigin(formattedAddress || locationName)
                     setLoadingLocation(false)
                 } catch (error) {
+                    window.clearTimeout(reverseTimeout)
                     console.error('❌ Reverse geocoding error:', error)
                     // Fallback - show quick locations
                     setLocationError('📍 Unable to verify your location. Please select a location below.')
@@ -492,6 +698,25 @@ const SearchBar = () => {
         )
     }
 
+    const searchDebugInfo = {
+        origin: {
+            searchQuery: selectedOriginPlace?.searchQuery || origin,
+            selectedPlace: selectedOriginPlace?.name || null,
+            latitude: selectedOriginPlace ? Number(selectedOriginPlace.lat) : null,
+            longitude: selectedOriginPlace ? Number(selectedOriginPlace.lng) : null,
+            source: selectedOriginPlace?.provider || (userCoords ? 'GPS' : null),
+            osmId: selectedOriginPlace?.osmId || null
+        },
+        destination: {
+            searchQuery: selectedDestinationPlace?.searchQuery || destination,
+            selectedPlace: selectedDestinationPlace?.name || null,
+            latitude: selectedDestinationPlace ? Number(selectedDestinationPlace.lat) : null,
+            longitude: selectedDestinationPlace ? Number(selectedDestinationPlace.lng) : null,
+            source: selectedDestinationPlace?.provider || null,
+            osmId: selectedDestinationPlace?.osmId || null
+        }
+    }
+
     return (
         <motion.form
             onSubmit={handleSearch}
@@ -507,8 +732,15 @@ const SearchBar = () => {
                         placeholder="Saan ka galing? (Origin)"
                         value={origin}
                         onChange={(e) => {
+                            originSelectionRequest.current += 1
                             setOrigin(e.target.value)
                             setSelectedOriginPlace(null)
+                            setUserCoords(null)
+                            setOriginSuggestions([])
+                            setOriginPlaceSuggestions([])
+                            setShowOriginSuggestions(false)
+                            setShowOriginPlaces(false)
+                            setLocationError('')
                         }}
                         onKeyDown={handleOriginKeyDown}
                         onFocus={() => origin.trim().length >= 2 && setShowOriginSuggestions(true)}
@@ -519,14 +751,18 @@ const SearchBar = () => {
                     {/* Place confirmed indicator */}
                     {selectedOriginPlace && (
                         <div className="absolute right-12 top-1/2 transform -translate-y-1/2 flex items-center space-x-1 z-10">
+                            <span className="hidden sm:inline text-xs text-gray-500 dark:text-gray-400">
+                                {selectedOriginPlace.provider || (userCoords ? 'GPS' : 'Saved place')}
+                            </span>
                             {locationConfidence && (
                                 <span className={`text-xs px-2 py-1 rounded-full mr-1 ${locationConfidence === 'high' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
                                     locationConfidence === 'medium' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
                                         'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300'
                                     }`}>
-                                    {locationConfidence === 'high' ? '✅' :
-                                        locationConfidence === 'medium' ? '⚠️' :
-                                            '⚠️'}
+                                    {locationConfidence === 'high' ? '✅ High' :
+                                        locationConfidence === 'medium' ? '⚠️ Approx.' :
+                                            '⚠️ Low'}
+                                    {selectedOriginPlace.accuracy ? ` · ${Math.round(selectedOriginPlace.accuracy)}m` : ''}
                                 </span>
                             )}
                             <CheckCircle size={18} className="text-green-600 dark:text-green-400" />
@@ -600,10 +836,10 @@ const SearchBar = () => {
                             >
                                 <div className="px-4 py-3 bg-primary-50 dark:bg-primary-900/30 border-b border-primary-200 dark:border-primary-700">
                                     <span className="text-sm font-semibold text-primary-700 dark:text-primary-300">
-                                        📍 Select exact location
+                                        📍 OpenStreetMap search results
                                     </span>
                                     <p className="text-xs text-primary-600 dark:text-primary-400 mt-1">
-                                        Choose the correct destination to ensure accurate routing
+                                        Select a result to use its mapped coordinates for routing
                                     </p>
                                 </div>
                                 {originPlaceSuggestions.map((place, index) => (
@@ -621,15 +857,20 @@ const SearchBar = () => {
                                             <div className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
                                                 {formatPlaceDisplay(place)}
                                             </div>
+                                            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                                Map feature: {place.osmType || 'OSM'} {place.osmId || 'ID unavailable'}
+                                                {' · '}{Number(place.lat).toFixed(6)}, {Number(place.lng).toFixed(6)}
+                                                {' · '}{place.locationPrecision || 'mapped location'}
+                                            </div>
                                             <div className="flex items-center space-x-2 mt-1">
+                                                <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                                                    {place.provider || 'Map search'}
+                                                </span>
                                                 {place.isKnownLocation && (
                                                     <span className="text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5 rounded-full">
                                                         Known Location
                                                     </span>
                                                 )}
-                                                <span className="text-xs text-gray-500 dark:text-gray-400">
-                                                    {(place.confidence * 100).toFixed(0)}% match
-                                                </span>
                                             </div>
                                         </div>
                                     </button>
@@ -711,8 +952,14 @@ const SearchBar = () => {
                         placeholder="Saan ka pupunta? (Destination)"
                         value={destination}
                         onChange={(e) => {
+                            destinationSelectionRequest.current += 1
                             setDestination(e.target.value)
                             setSelectedDestinationPlace(null)
+                            setDestinationSuggestions([])
+                            setDestinationPlaceSuggestions([])
+                            setShowDestinationSuggestions(false)
+                            setShowDestinationPlaces(false)
+                            setLocationError('')
                         }}
                         onKeyDown={handleDestinationKeyDown}
                         onFocus={() => destination.trim().length >= 2 && setShowDestinationSuggestions(true)}
@@ -723,6 +970,9 @@ const SearchBar = () => {
                     {/* Place confirmed indicator */}
                     {selectedDestinationPlace && (
                         <div className="absolute right-3 top-1/2 transform -translate-y-1/2 flex items-center space-x-1 z-10">
+                            <span className="hidden sm:inline text-xs text-gray-500 dark:text-gray-400">
+                                {selectedDestinationPlace.provider || 'Saved place'}
+                            </span>
                             <CheckCircle size={18} className="text-green-600 dark:text-green-400" />
                             <button
                                 type="button"
@@ -781,10 +1031,10 @@ const SearchBar = () => {
                             >
                                 <div className="px-4 py-3 bg-cyan-50 dark:bg-cyan-900/30 border-b border-cyan-200 dark:border-cyan-700">
                                     <span className="text-sm font-semibold text-cyan-700 dark:text-cyan-300">
-                                        📍 Select exact destination
+                                        📍 OpenStreetMap search results
                                     </span>
                                     <p className="text-xs text-cyan-600 dark:text-cyan-400 mt-1">
-                                        Choose the correct destination to ensure accurate routing
+                                        Select a result to use its mapped coordinates for routing
                                     </p>
                                 </div>
                                 {destinationPlaceSuggestions.map((place, index) => (
@@ -802,15 +1052,20 @@ const SearchBar = () => {
                                             <div className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
                                                 {formatPlaceDisplay(place)}
                                             </div>
+                                            <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                                Map feature: {place.osmType || 'OSM'} {place.osmId || 'ID unavailable'}
+                                                {' · '}{Number(place.lat).toFixed(6)}, {Number(place.lng).toFixed(6)}
+                                                {' · '}{place.locationPrecision || 'mapped location'}
+                                            </div>
                                             <div className="flex items-center space-x-2 mt-1">
+                                                <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                                                    {place.provider || 'Map search'}
+                                                </span>
                                                 {place.isKnownLocation && (
                                                     <span className="text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 px-2 py-0.5 rounded-full">
                                                         Known Location
                                                     </span>
                                                 )}
-                                                <span className="text-xs text-gray-500 dark:text-gray-400">
-                                                    {(place.confidence * 100).toFixed(0)}% match
-                                                </span>
                                             </div>
                                         </div>
                                     </button>
@@ -830,7 +1085,40 @@ const SearchBar = () => {
                     )}
                 </div>
 
-                {/* Search Button */}
+                    {(selectedOriginPlace || selectedDestinationPlace) && (
+                        <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <label className="text-sm font-medium" htmlFor="saved-place-label">Save selected place as</label>
+                                <BiyaHeroSelect
+                                    id="saved-place-label"
+                                    ariaLabel="Save selected place as"
+                                    value={savedPlaceLabel}
+                                    onChange={setSavedPlaceLabel}
+                                    className="min-w-40"
+                                    options={[
+                                        { value: 'home', label: 'Home' },
+                                        { value: 'work', label: 'Work' },
+                                        { value: 'school', label: 'School' },
+                                        { value: 'favorite', label: 'Favorite' },
+                                        { value: 'custom', label: 'Custom place' }
+                                    ]}
+                                />
+                                {selectedOriginPlace && !userCoords && (
+                                    <button type="button" onClick={() => savePlace(selectedOriginPlace)} className="text-sm font-semibold text-primary-700 dark:text-cyan-300">
+                                        Save origin
+                                    </button>
+                                )}
+                                {selectedDestinationPlace && (
+                                    <button type="button" onClick={() => savePlace(selectedDestinationPlace)} className="text-sm font-semibold text-primary-700 dark:text-cyan-300">
+                                        Save destination
+                                    </button>
+                                )}
+                            </div>
+                            {savedPlaceMessage && <p role="status" className="text-xs text-gray-600 dark:text-gray-400">{savedPlaceMessage}</p>}
+                        </div>
+                    )}
+
+                    {/* Search Button */}
                 <motion.button
                     type="submit"
                     whileHover={{ scale: 1.02 }}
@@ -854,7 +1142,7 @@ const SearchBar = () => {
                 )}
 
                 {/* Debug Panel (Development Only) */}
-                {import.meta.env.DEV && debugInfo && (
+                {import.meta.env.DEV && (debugInfo || selectedOriginPlace || selectedDestinationPlace) && (
                     <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
@@ -873,7 +1161,7 @@ const SearchBar = () => {
                             </button>
                         </div>
                         <pre className="text-xs text-gray-700 dark:text-gray-300 overflow-auto max-h-64">
-                            {JSON.stringify(debugInfo, null, 2)}
+                            {JSON.stringify({ ...debugInfo, search: searchDebugInfo }, null, 2)}
                         </pre>
                     </motion.div>
                 )}

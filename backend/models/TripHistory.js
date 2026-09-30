@@ -27,11 +27,11 @@ const TripHistory = sequelize.define('TripHistory', {
     },
     originLat: {
         type: DataTypes.DECIMAL(10, 8),
-        allowNull: false
+        allowNull: true
     },
     originLng: {
         type: DataTypes.DECIMAL(11, 8),
-        allowNull: false
+        allowNull: true
     },
     destinationName: {
         type: DataTypes.STRING,
@@ -39,21 +39,54 @@ const TripHistory = sequelize.define('TripHistory', {
     },
     destinationLat: {
         type: DataTypes.DECIMAL(10, 8),
-        allowNull: false
+        allowNull: true
     },
     destinationLng: {
         type: DataTypes.DECIMAL(11, 8),
-        allowNull: false
+        allowNull: true
     },
     distance: {
         type: DataTypes.DECIMAL(10, 2),
-        allowNull: false,
+        allowNull: true,
         comment: 'Distance in kilometers'
     },
     fare: {
         type: DataTypes.DECIMAL(10, 2),
         allowNull: false,
         comment: 'Actual fare paid in PHP'
+    },
+    baselineFare: {
+        type: DataTypes.DECIMAL(10, 2),
+        allowNull: true,
+        validate: { min: 0 }
+    },
+    originMunicipality: {
+        type: DataTypes.STRING(120),
+        allowNull: true
+    },
+    destinationMunicipality: {
+        type: DataTypes.STRING(120),
+        allowNull: true
+    },
+    routeId: {
+        type: DataTypes.STRING(120),
+        allowNull: true
+    },
+    segments: {
+        type: DataTypes.JSON,
+        allowNull: false,
+        defaultValue: []
+    },
+    transfers: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        validate: { min: 0 }
+    },
+    source: {
+        type: DataTypes.ENUM('route', 'expense'),
+        allowNull: false,
+        defaultValue: 'route'
     },
     passengerType: {
         type: DataTypes.ENUM('regular', 'student', 'senior', 'pwd'),

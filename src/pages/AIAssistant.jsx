@@ -2,8 +2,20 @@ import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Send, Bot, User, Sparkles } from 'lucide-react'
 import { getAIResponse } from '../utils/aiResponses'
+import { getAssistantSuggestions } from '../services/accountService'
+import { getPlaceSuggestions } from '../services/geocodingService'
+import { useAuth } from '../context/AuthContext'
+
+const getCommutePlaceQueries = message => {
+    const explicitTrip = message.match(/\b(?:from|galing sa)\s+(.+?)\s+(?:to|papuntang|papunta sa|hanggang)\s+(.+?)(?:[?.!]|$)/i)
+    if (explicitTrip) return { origin: explicitTrip[1].trim(), destination: explicitTrip[2].trim() }
+
+    const destination = message.match(/\b(?:to|towards?|papuntang|papunta sa|pumunta sa|magpunta sa|hanggang)\s+(.+?)(?:[?.!]|$)/i)
+    return { origin: '', destination: destination?.[1]?.trim() || '' }
+}
 
 const AIAssistant = () => {
+    const { activeLocation, user } = useAuth()
     const [messages, setMessages] = useState([
         {
             id: 1,
@@ -14,16 +26,10 @@ const AIAssistant = () => {
     ])
     const [input, setInput] = useState('')
     const [isTyping, setIsTyping] = useState(false)
+    const [suggestedPrompts, setSuggestedPrompts] = useState([])
+    const [suggestionError, setSuggestionError] = useState('')
+    const [routeContext, setRouteContext] = useState(null)
     const messagesEndRef = useRef(null)
-
-    const suggestedPrompts = [
-        'Paano pumunta sa Lipa City?',
-        'Magkano pamasahe from Lipa to Batangas City?',
-        'Safe ba mag-commute ng gabi sa Batangas?',
-        'Anong oras huling byahe ng bus to Manila?',
-        'May jeep pa ba papuntang SM Lipa?',
-        'Fastest route to Batangas Port?'
-    ]
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -32,6 +38,17 @@ const AIAssistant = () => {
     useEffect(() => {
         scrollToBottom()
     }, [messages])
+
+    useEffect(() => {
+        getAssistantSuggestions(activeLocation)
+            .then(setSuggestedPrompts)
+            .catch((error) => {
+                setSuggestionError(error.friendlyMessage || 'Location-based questions are temporarily unavailable.')
+                setSuggestedPrompts(activeLocation
+                    ? [`May verified route mula ${activeLocation.name}?`, 'Nasaan ang pinakamalapit na transport hub?']
+                    : ['Paano makakahanap ng verified route sa Batangas?', 'Nasaan ang pinakamalapit na transport hub?'])
+            })
+    }, [activeLocation])
 
     const handleSend = async (text = input) => {
         if (!text.trim()) return
@@ -47,13 +64,45 @@ const AIAssistant = () => {
         setInput('')
         setIsTyping(true)
 
-        // Get AI response (async)
         try {
-            const responseText = await getAIResponse(text.trim())
+            const queries = getCommutePlaceQueries(text.trim())
+            let originPlace = null
+            let destinationPlace = null
+            let placeLookupError = ''
+            if (queries.origin) {
+                try {
+                    originPlace = (await getPlaceSuggestions(queries.origin, 1))[0] || null
+                } catch (error) {
+                    console.error('AI origin place lookup failed:', error)
+                    placeLookupError = 'OpenStreetMap could not resolve the typed origin.'
+                }
+            }
+            if (queries.destination) {
+                try {
+                    destinationPlace = (await getPlaceSuggestions(queries.destination, 1))[0] || null
+                    if (!destinationPlace) placeLookupError = 'No matching OpenStreetMap place was found for the destination.'
+                } catch (error) {
+                    console.error('AI destination place lookup failed:', error)
+                    placeLookupError = 'OpenStreetMap could not resolve the typed destination.'
+                }
+            }
+            const responseText = await getAIResponse(text.trim(), {
+                activeLocation,
+                routeContext,
+                originPlace,
+                destinationPlace,
+                passengerType: user.passengerType,
+                preference: user.routePreference
+            })
+            if (responseText.routeContext) setRouteContext(responseText.routeContext)
+            else if (responseText.clearRouteContext) setRouteContext(null)
+            const answer = placeLookupError && responseText.responseType === 'location-needed'
+                ? `${responseText.response}\n\n${placeLookupError}`
+                : responseText.response
             const botResponse = {
                 id: Date.now() + 1,
                 type: 'bot',
-                text: responseText,
+                text: answer,
                 timestamp: new Date()
             }
             setMessages(prev => [...prev, botResponse])
@@ -92,6 +141,11 @@ const AIAssistant = () => {
                 <p className="text-gray-600 dark:text-gray-400">
                     Ask me anything about commuting in Taglish!
                 </p>
+                {activeLocation && (
+                    <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                        Active location: {activeLocation.formattedAddress || activeLocation.name}
+                    </p>
+                )}
             </motion.div>
 
             {/* Suggested Prompts */}
@@ -102,6 +156,7 @@ const AIAssistant = () => {
                     className="mb-6"
                 >
                     <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">Try asking:</p>
+                    {suggestionError && <p className="mb-2 text-xs text-amber-700 dark:text-amber-300">{suggestionError}</p>}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                         {suggestedPrompts.map((prompt, index) => (
                             <motion.button

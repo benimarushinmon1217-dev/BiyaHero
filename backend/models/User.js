@@ -70,6 +70,11 @@ const User = sequelize.define('User', {
         defaultValue: 'regular',
         comment: 'Passenger category for fare discounts'
     },
+    routePreference: {
+        type: DataTypes.ENUM('recommended', 'cheapest', 'fastest', 'least_transfers'),
+        allowNull: false,
+        defaultValue: 'recommended'
+    },
     isVerified: {
         type: DataTypes.BOOLEAN,
         defaultValue: false

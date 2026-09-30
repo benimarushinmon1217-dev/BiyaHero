@@ -12,6 +12,7 @@ import Alert from './Alert.js';
 import TransportHub from './TransportHub.js';
 import TransportRoute from './TransportRoute.js';
 import RouteSegment from './RouteSegment.js';
+import SavedPlace from './SavedPlace.js';
 
 /**
  * Define Model Associations
@@ -37,6 +38,16 @@ User.hasMany(TripHistory, {
 });
 TripHistory.belongsTo(User, {
     foreignKey: 'user_id', // Use underscored version
+    as: 'user'
+});
+
+User.hasMany(SavedPlace, {
+    foreignKey: 'user_id',
+    as: 'savedPlaces',
+    onDelete: 'CASCADE'
+});
+SavedPlace.belongsTo(User, {
+    foreignKey: 'user_id',
     as: 'user'
 });
 
@@ -99,7 +110,8 @@ export {
     Alert,
     TransportHub,
     TransportRoute,
-    RouteSegment
+    RouteSegment,
+    SavedPlace
 };
 
 export default {
@@ -111,5 +123,6 @@ export default {
     Alert,
     TransportHub,
     TransportRoute,
-    RouteSegment
+    RouteSegment,
+    SavedPlace
 };

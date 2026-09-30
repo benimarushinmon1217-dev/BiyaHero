@@ -1,14 +1,17 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import Navbar from './components/Navbar'
 import DevStatusPanel from './components/DevStatusPanel'
 import LandingPage from './pages/LandingPage'
-import RouteResults from './pages/RouteResults'
 import RouteResultsMultiModal from './pages/RouteResultsMultiModal'
 import AIAssistant from './pages/AIAssistant'
 import Alerts from './pages/Alerts'
 import Profile from './pages/Profile'
 import Features from './pages/Features'
+import AuthPage from './pages/AuthPage'
+import ProtectedRoute from './components/ProtectedRoute'
+import { AuthProvider } from './context/AuthContext'
+import FareCalculator from './pages/FareCalculator'
 
 function App() {
     const [darkMode, setDarkMode] = useState(false)
@@ -22,23 +25,34 @@ function App() {
     }, [darkMode])
 
     return (
-        <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-            <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-cyan-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 transition-colors duration-300">
-                <Navbar darkMode={darkMode} setDarkMode={setDarkMode} />
-                <Routes>
-                    <Route path="/" element={<LandingPage />} />
-                    <Route path="/route" element={<RouteResultsMultiModal />} />
-                    <Route path="/route-old" element={<RouteResults />} />
-                    <Route path="/assistant" element={<AIAssistant />} />
-                    <Route path="/alerts" element={<Alerts />} />
-                    <Route path="/profile" element={<Profile />} />
-                    <Route path="/dev/features" element={<Features />} />
-                </Routes>
-
-                {/* Development Status Panel */}
-                <DevStatusPanel />
-            </div>
-        </Router>
+        <AuthProvider>
+            <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+                <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-cyan-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 transition-colors duration-300">
+                    <Routes>
+                        <Route path="/login" element={<AuthPage mode="login" />} />
+                        <Route path="/signup" element={<AuthPage mode="signup" />} />
+                        <Route path="*" element={
+                            <ProtectedRoute>
+                                <>
+                                    <Navbar darkMode={darkMode} setDarkMode={setDarkMode} />
+                                    <Routes>
+                                        <Route path="/" element={<LandingPage />} />
+                                        <Route path="/route" element={<RouteResultsMultiModal />} />
+                                        <Route path="/route-old" element={<Navigate to="/" replace />} />
+                                        <Route path="/assistant" element={<AIAssistant />} />
+                                        <Route path="/alerts" element={<Alerts />} />
+                                        <Route path="/profile" element={<Profile />} />
+                                        <Route path="/fare-calculator" element={<FareCalculator />} />
+                                        <Route path="/dev/features" element={<Features />} />
+                                    </Routes>
+                                    <DevStatusPanel />
+                                </>
+                            </ProtectedRoute>
+                        } />
+                    </Routes>
+                </div>
+            </Router>
+        </AuthProvider>
     )
 }
 

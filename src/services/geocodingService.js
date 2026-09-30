@@ -2,7 +2,14 @@
 // Provides structured place selection with validated coordinates
 // Prioritizes Batangas landmarks and prevents destination ambiguity
 
-import { getLocationByName } from './searchService'
+import { isWithinBatangasScope } from '../utils/batangasScope'
+
+export const resolvePlaceSuggestion = async suggestion => {
+    if (!suggestion || !isWithinBatangasScope(suggestion)) {
+        throw new Error('Select a location within BiyaHero’s supported Batangas service area.')
+    }
+    return suggestion
+}
 
 /**
  * Place object structure
@@ -20,29 +27,34 @@ import { getLocationByName } from './searchService'
  */
 
 /**
- * Get structured place suggestions from Nominatim
- * Returns multiple options for user confirmation
+ * Search mapped OpenStreetMap features by name and return their source identity
+ * and mapped coordinates. Coverage depends on the features contributed to OSM.
  * @param {string} query - Search query
  * @param {number} limit - Maximum results (default: 5)
  * @returns {Promise<Array<Place>>} Array of place objects
  */
 export const getPlaceSuggestions = async (query, limit = 5) => {
     try {
-        // Check if location exists in local database first
-        const localLocation = getLocationByName(query)
-        const searchQuery = localLocation ? localLocation.name : query
-
-        // Search with Batangas bias
+        const searchQuery = query.trim()
+        const resultLimit = Math.max(1, Math.min(Number(limit) || 5, 10))
         const url = `https://nominatim.openstreetmap.org/search?` +
-            `format=json` +
+            `format=jsonv2` +
             `&q=${encodeURIComponent(searchQuery)}, Batangas, Philippines` +
-            `&limit=${limit}` +
+            `&limit=${resultLimit}` +
             `&addressdetails=1` +
             `&extratags=1` +
             `&namedetails=1` +
             `&accept-language=en`
 
-        const response = await fetch(url)
+        const controller = new AbortController()
+        const timeout = window.setTimeout(() => controller.abort(), 8000)
+        let response
+        try {
+            response = await fetch(url, { signal: controller.signal })
+        } finally {
+            window.clearTimeout(timeout)
+        }
+        if (!response.ok) throw new Error(`Geocoder returned HTTP ${response.status}`)
         const data = await response.json()
 
         if (!data || data.length === 0) {
@@ -50,7 +62,13 @@ export const getPlaceSuggestions = async (query, limit = 5) => {
         }
 
         // Convert to structured place objects
-        const places = data.map(result => createPlaceObject(result, !!localLocation))
+        const places = data
+            .map(result => ({
+                ...createPlaceObject(result),
+                searchQuery,
+                provider: 'OpenStreetMap'
+            }))
+            .filter(place => isWithinBatangasScope(place))
 
         // Sort by confidence and Batangas priority
         return places.sort((a, b) => {
@@ -69,7 +87,7 @@ export const getPlaceSuggestions = async (query, limit = 5) => {
         })
     } catch (error) {
         console.error('Place suggestions error:', error)
-        return []
+        throw error
     }
 }
 
@@ -83,30 +101,52 @@ const createPlaceObject = (result, isKnownLocation = false) => {
     const address = result.address || {}
 
     // Extract place category from OSM type
-    const category = categorizePlaceType(result.type, result.class, address)
+    const osmCategory = result.category || result.class
+    const category = categorizePlaceType(result.type, osmCategory, address)
 
     // Calculate confidence score
     const confidence = calculateConfidence(result, address, isKnownLocation)
 
     // Extract municipality
-    const municipality = address.city || address.town || address.village ||
-        address.municipality || address.county || ''
+    const municipality = address.city || address.town || address.municipality ||
+        address.county || ''
 
     // Extract province
-    const province = address.state || address.province || ''
+    const province = address.province || (String(address.state || '').toLowerCase().includes('batangas') ? address.state : '')
+    const barangay = address.suburb || address.village || address.neighbourhood || address.hamlet || ''
+    const street = [address.house_number, address.road].filter(Boolean).join(' ')
+
+    const osmType = String(result.osm_type || '').toLowerCase()
+    const osmId = result.osm_id
+    const mapObjectUrl = osmId && ['node', 'way', 'relation'].includes(osmType)
+        ? `https://www.openstreetmap.org/${osmType}/${osmId}`
+        : null
 
     return {
         name: result.name || result.display_name.split(',')[0],
         lat: parseFloat(result.lat),
         lng: parseFloat(result.lon),
         displayName: result.display_name,
+        formattedAddress: result.display_name,
+        street,
+        barangay,
         category,
         municipality,
         province,
         confidence,
         placeType: result.type,
-        osmClass: result.class,
-        isKnownLocation
+        osmClass: osmCategory,
+        osmType,
+        osmId,
+        osmUrl: mapObjectUrl,
+        locationPrecision: osmType === 'node' ? 'mapped point' : 'mapped feature centre',
+        boundingBox: Array.isArray(result.boundingbox)
+            ? result.boundingbox.map(Number)
+            : null,
+        osmTags: result.extratags || {},
+        osmNameDetails: result.namedetails || {},
+        isKnownLocation,
+        provider: 'OpenStreetMap'
     }
 }
 
@@ -192,12 +232,12 @@ const calculateConfidence = (result, address, isKnownLocation) => {
     }
 
     // Penalty for roads and parking
-    if (result.class === 'highway' || result.type === 'parking') {
+    if ((result.category || result.class) === 'highway' || result.type === 'parking') {
         confidence -= 0.2
     }
 
     // Penalty for administrative boundaries (too broad)
-    if (result.class === 'boundary') {
+    if ((result.category || result.class) === 'boundary') {
         confidence -= 0.15
     }
 
@@ -278,7 +318,8 @@ export const reverseGeocode = async (lat, lng) => {
             return null
         }
 
-        return createPlaceObject(data, false)
+        const place = createPlaceObject(data, false)
+        return isWithinBatangasScope(place) ? place : null
     } catch (error) {
         console.error('Reverse geocode error:', error)
         return null
@@ -330,7 +371,7 @@ export const formatPlaceDisplay = (place) => {
             transport: 'Transport Hub',
             building: 'Building'
         }
-        const label = categoryLabels[place.category]
+        const label = categoryLabels[place.category] || place.placeType?.replaceAll('_', ' ')
         if (label) parts.push(label)
     }
 

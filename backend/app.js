@@ -18,6 +18,7 @@ import { errorHandler, notFound } from './middleware/errorHandler.js';
 // Import routes
 import authRoutes from './routes/authRoutes.js';
 import multiModalRouteRoutes from './routes/multiModalRouteRoutes.js';
+import accountRoutes from './routes/accountRoutes.js';
 
 // Load environment variables
 dotenv.config();
@@ -118,6 +119,7 @@ app.get('/health', async (req, res) => {
 const API_VERSION = process.env.API_VERSION || 'v1';
 app.use(`/api/${API_VERSION}/auth`, authRoutes);
 app.use(`/api/${API_VERSION}/routes`, multiModalRouteRoutes);
+app.use(`/api/${API_VERSION}`, accountRoutes);
 
 // 404 handler
 app.use(notFound);

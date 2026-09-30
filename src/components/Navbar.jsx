@@ -1,9 +1,11 @@
 import { Link, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Home, Map, MessageCircle, Bell, User, Moon, Sun } from 'lucide-react'
+import { Home, Map, MessageCircle, Bell, User, Moon, Sun, Wallet, LogOut } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
 
 const Navbar = ({ darkMode, setDarkMode }) => {
     const location = useLocation()
+    const { logout } = useAuth()
 
     const navItems = [
         { path: '/', icon: Home, label: 'Home' },
@@ -11,6 +13,7 @@ const Navbar = ({ darkMode, setDarkMode }) => {
         { path: '/assistant', icon: MessageCircle, label: 'AI Assistant' },
         { path: '/alerts', icon: Bell, label: 'Alerts' },
         { path: '/profile', icon: User, label: 'Profile' },
+        { path: '/fare-calculator', icon: Wallet, label: 'Fares' },
     ]
 
     return (
@@ -58,18 +61,24 @@ const Navbar = ({ darkMode, setDarkMode }) => {
                         })}
                     </div>
 
-                    {/* Dark Mode Toggle */}
-                    <button
-                        onClick={() => setDarkMode(!darkMode)}
-                        className="p-2 rounded-lg glass hover:shadow-lg transition-all"
-                    >
-                        {darkMode ? <Sun size={20} /> : <Moon size={20} />}
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            aria-label={darkMode ? 'Switch to light theme' : 'Switch to dark theme'}
+                            onClick={() => setDarkMode(!darkMode)}
+                            className="p-2 rounded-lg glass hover:shadow-lg transition-all"
+                        >
+                            {darkMode ? <Sun size={20} /> : <Moon size={20} />}
+                        </button>
+                        <button type="button" onClick={logout} className="hidden sm:flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800">
+                            <LogOut size={17} /><span>Log out</span>
+                        </button>
+                    </div>
                 </div>
 
                 {/* Mobile Navigation */}
                 <div className="md:hidden fixed bottom-0 left-0 right-0 glass-strong border-t border-gray-200 dark:border-gray-700 pb-safe">
-                    <div className="flex items-center justify-around py-2">
+                    <div className="flex items-center justify-around py-1">
                         {navItems.map((item) => {
                             const Icon = item.icon
                             const isActive = location.pathname === item.path
@@ -83,13 +92,14 @@ const Navbar = ({ darkMode, setDarkMode }) => {
                                         size={24}
                                         className={isActive ? 'text-primary-600 dark:text-cyan-400' : 'text-gray-600 dark:text-gray-400'}
                                     />
-                                    <span className={`text-xs ${isActive ? 'text-primary-600 dark:text-cyan-400 font-semibold' : 'text-gray-600 dark:text-gray-400'}`}>
+                                    <span className={`text-[10px] ${isActive ? 'text-primary-600 dark:text-cyan-400 font-semibold' : 'text-gray-600 dark:text-gray-400'}`}>
                                         {item.label}
                                     </span>
                                 </Link>
                             )
                         })}
                     </div>
+                    <button type="button" onClick={logout} className="w-full border-t border-gray-200 py-1 text-xs text-gray-600 dark:border-gray-700 dark:text-gray-300">Log out</button>
                 </div>
             </div>
         </motion.nav>

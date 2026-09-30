@@ -85,6 +85,7 @@ apiClient.interceptors.response.use(
             // Clear token and redirect to login
             localStorage.removeItem('token')
             localStorage.removeItem('user')
+            window.dispatchEvent(new Event('biyahero:unauthorized'))
 
             // Only redirect if not already on login page
             if (!window.location.pathname.includes('/login')) {
