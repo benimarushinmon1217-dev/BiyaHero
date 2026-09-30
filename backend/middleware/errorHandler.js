@@ -9,6 +9,7 @@ import { ApiError } from '../utils/ApiError.js';
  * Global error handler
  */
 export const errorHandler = (err, req, res, next) => {
+    const originalError = err;
     let error = err;
 
     // Convert non-ApiError errors to ApiError
@@ -18,12 +19,13 @@ export const errorHandler = (err, req, res, next) => {
         error = new ApiError(statusCode, message, error.stack);
     }
 
-    // Log error in development
-    if (process.env.NODE_ENV === 'development') {
+    if (error.statusCode >= 500 || process.env.NODE_ENV === 'development') {
         console.error('Error:', {
-            message: error.message,
+            method: req.method,
+            path: req.originalUrl,
+            message: originalError.message,
             statusCode: error.statusCode,
-            stack: error.stack
+            stack: originalError.stack
         });
     }
 
